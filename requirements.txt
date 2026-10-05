@@ -1,0 +1,6 @@
+requests>=2.31
+websocket-client>=1.7
+pyyaml>=6.0
+
+# 可选：走 comfy-cli 时需要
+# comfy-cli>=1.14

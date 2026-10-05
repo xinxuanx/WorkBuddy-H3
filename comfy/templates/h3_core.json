@@ -1,0 +1,190 @@
+{
+  "_comment": [
+    "H3 核心槽位模板。节点名取自真实可跑的工作流（F:\\H3\\MiniMax-H3一键短剧V7.5_Singularity_PDMD_LynnReal_SOP.json），不是猜的。",
+    "首次使用请先跑：python comfy/build_workflow.py verify --workflow <产物>",
+    "_cond 标记条件节点：attention==sla 时只发射 Model Sparse Attention；attention==veda 时只发射 Veda；turbo==lora 时才发射 LoRA 节点。三者互斥由构建器保证。",
+    "MODEL 链路：UNETLoader(10) -> [LoRA 11] -> SigmaShift(12) -> [SLA 13 / Veda 14] -> StreamedBlocks(15)",
+    "删除节点时构建器会把输入链路自动短路到上游。"
+  ],
+
+  "10": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "{{UNET_NAME}}",
+      "weight_dtype": "{{WEIGHT_DTYPE}}"
+    }
+  },
+
+  "11": {
+    "_cond": { "include_if": "turbo == 'lora'" },
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": ["10", 0],
+      "lora_name": "{{TURBO_LORA}}",
+      "strength_model": "{{TURBO_STRENGTH}}"
+    }
+  },
+
+  "12": {
+    "class_type": "MiniMaxH3SigmaShift",
+    "inputs": {
+      "model": ["11", 0],
+      "shift_video": "{{SHIFT_VIDEO}}",
+      "shift_audio": "{{SHIFT_AUDIO}}"
+    }
+  },
+
+  "13": {
+    "_cond": { "include_if": "attention == 'sla'" },
+    "class_type": "Model Sparse Attention",
+    "inputs": {
+      "model": ["12", 0],
+      "method": "sol-attn",
+      "tau": 1.3,
+      "start_percent": 0.2,
+      "end_percent": 1.0,
+      "min_tokens": 12288,
+      "extra_tokens": 256,
+      "sink_conditioning": "{{SINK_CONDITIONING}}",
+      "verbose": false
+    }
+  },
+
+  "14": {
+    "_cond": { "include_if": "attention == 'veda'" },
+    "class_type": "Veda Sparse Attention (MiniMax H3)",
+    "inputs": {
+      "model": ["13", 0],
+      "predictor": "minimax_h3_t2va_veda_8nfe_600step_preview_fp8.safetensors",
+      "generated_sparsity": "{{SPARSITY}}",
+      "reference_sparsity": "{{SPARSITY}}",
+      "verbose": false
+    }
+  },
+
+  "15": {
+    "class_type": "H3StreamedBlocks",
+    "inputs": {
+      "model": ["14", 0],
+      "q_chunk": 16384,
+      "kv_chunk": 16384,
+      "mlp_chunk": 16384,
+      "min_tokens": 32768,
+      "kv_block": 0,
+      "final_layer_chunk": 16384,
+      "final_layer_gemm": "exact (whole GEMM, one fp32 buffer)",
+      "kv_store": "bf16 (exact)",
+      "trim_forward": true,
+      "self_check": false,
+      "exact_av_rows": false
+    }
+  },
+
+  "20": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "{{CLIP_NAME}}",
+      "type": "{{CLIP_TYPE}}",
+      "device": "default"
+    }
+  },
+
+  "21": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "{{VIDEO_VAE}}" }
+  },
+
+  "22": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "{{AUDIO_VAE}}" }
+  },
+
+  "30": {
+    "class_type": "Yuan_MiniMaxH3Video",
+    "inputs": {
+      "clip": ["20", 0],
+      "vae": ["21", 0],
+      "audio_vae": ["22", 0],
+      "ref_images": ["31", 0],
+      "mode": "{{MODE}}",
+      "prompt": "{{PROMPT}}",
+      "width": "{{WIDTH}}",
+      "height": "{{HEIGHT}}",
+      "length": "{{LENGTH}}",
+      "ref_image_size": "匹配",
+      "guide_frame_idx": 0
+    }
+  },
+
+  "31": {
+    "class_type": "MultiImageLoader",
+    "inputs": {
+      "image_paths": "{{REF_IMAGES}}",
+      "start_index": 0,
+      "max_count": 9
+    }
+  },
+
+  "40": {
+    "class_type": "KSamplerSelect",
+    "inputs": { "sampler_name": "{{SAMPLER}}" }
+  },
+
+  "41": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": ["15", 0],
+      "scheduler": "{{SCHEDULER}}",
+      "steps": "{{STEPS}}",
+      "denoise": 1.0
+    }
+  },
+
+  "42": {
+    "class_type": "RandomNoise",
+    "inputs": { "noise_seed": "{{SEED}}" }
+  },
+
+  "43": {
+    "class_type": "BasicGuider",
+    "inputs": {
+      "model": ["15", 0],
+      "conditioning": ["30", 0]
+    }
+  },
+
+  "44": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "guider": ["43", 0],
+      "sampler": ["40", 0],
+      "sigmas": ["41", 0],
+      "latent_image": ["30", 1],
+      "noise": ["42", 0]
+    }
+  },
+
+  "50": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["44", 0],
+      "vae": ["21", 0]
+    }
+  },
+
+  "60": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": ["50", 0],
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "{{JOB_ID}}",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "pingpong": false,
+      "save_output": true
+    }
+  }
+}

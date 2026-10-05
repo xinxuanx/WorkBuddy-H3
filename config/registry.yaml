@@ -1,0 +1,346 @@
+# =============================================================================
+# WorkBuddy H3 — 唯一配置源
+# 硬件档位 / 模型注册表 / 工作流变体 / 采样配方
+# 所有代码与文档都从这里取值，改配置不要改代码。
+# =============================================================================
+
+version: 1
+project: WorkBuddy H3
+comfy_root: "F:/X/ComfyUI"          # TODO: 指向真实 ComfyUI 安装根目录
+comfy_host: "127.0.0.1:8188"
+
+# -----------------------------------------------------------------------------
+# 1. 硬件档位（决定一切：用哪个权重、什么分辨率、几步）
+# -----------------------------------------------------------------------------
+hardware_tiers:
+  t10:                              # ← 当前机器：RTX 3080 10GB
+    vram_gb: 10
+    gpu: "RTX 3080"
+    max_weight_bytes: 12_000_000_000   # 单权重文件字节上限
+    preferred_quant: [w4a8, int4, nvfp4_awq]
+    resolution_presets:
+      portrait:  "544x960"          # 9:16 竖屏，基线
+      landscape: "960x544"
+      square:    "768x768"
+    steps: 4
+    vae: lynnreal_light_int8_convrot  # 2.14GB，解码再快 1.3x
+    text_encoder: qwen3vl_32b_nvfp4_awq  # 15.7GB，仍需 CPU offload
+    launch_args:
+      - "--lowvram"                 # 或 --novram，见 docs/01
+      - "--reserve-vram 0.6"
+      - "--async-offload 2"
+      - "--fast fp16_accumulation"
+      - "--disable-auto-launch"
+    notes: >
+      10GB 装不下任何 H3 权重（最小 w4a8 约 11.8GB），必然走 CPU offload。
+      每步都要从内存搬一次权重，因此「步数」和「权重体积」是双重成本：
+      4 步 w4a8 ≈ 4×12GB ≈ 48GB 传输；20 步 int8 ≈ 20×21GB ≈ 420GB，不可接受。
+      结论：10GB 档位必须 4 步 + w4a8/int4，且必须降低分辨率。
+
+  t16:
+    vram_gb: 16
+    max_weight_bytes: 17_000_000_000
+    preferred_quant: [int8_convrot, w4a8]
+    resolution_presets:
+      portrait:  "768x1344"
+      landscape: "1152x640"
+      square:    "1024x1024"
+    steps: 4
+    vae: lynnreal_light_int8_convrot
+    text_encoder: qwen3vl_32b_nvfp4_awq
+    launch_args: ["--normalvram", "--fast fp16_accumulation", "--disable-auto-launch"]
+    notes: "MATLOWAI 实测 16GB 峰值 11.0GiB、65s（1152x640x243f）。"
+
+  t24:
+    vram_gb: 24
+    max_weight_bytes: 26_000_000_000
+    preferred_quant: [int8_convrot]
+    resolution_presets:
+      portrait:  "768x1344"
+      landscape: "1344x768"
+      square:    "1024x1024"
+    steps: 8
+    vae: official_int8_convrot
+    text_encoder: qwen3vl_32b_int8_convrot
+    launch_args: ["--normalvram", "--fast fp16_accumulation", "--disable-auto-launch"]
+
+  t48:
+    vram_gb: 48
+    max_weight_bytes: 40_000_000_000
+    preferred_quant: [bf16]
+    resolution_presets:
+      portrait:  "1536x2752"
+      landscape: "1920x1080"
+      square:    "1536x1536"
+    steps: 20
+    vae: official_fp16
+    text_encoder: qwen3vl_32b_bf16
+    launch_args: ["--highvram", "--disable-auto-launch"]
+
+# -----------------------------------------------------------------------------
+# 2. MiniMax-H3 主权重注册表
+#    放置目录：models/diffusion_models/MiniMaxH3/
+# -----------------------------------------------------------------------------
+h3_weights:
+  # ---- 候选 A：MATLOWAI 融合 turbo（你已下载） ----
+  matlowai_fused_turbo_int8_convrot:
+    file: "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors"
+    size_bytes: 20_980_178_976
+    source: "https://huggingface.co/MATLOWAI/minimax-h3-fused-turbo-int8-convrot"
+    kind: fused                     # fl2va base + r1024 SVD (ref2va - fl2va) delta
+    modes: [t2va, i2va, fl2va, ref2va]   # 一个文件通吃，不用换权重
+    turbo: fused                    # turbo 已融合进权重
+    fused_loras:
+      - "lightx2v FL2VA Turbo 8-step v1.0 @ strength 1.0 (rank-24 resize)"
+      - "Mystic v2.0 @ strength 0.7 (运动平滑)"
+    recommended_steps: 4            # 作者原话："it is a 4-or-8 NFE model: run it at 4 steps"
+    sampler: res_multistep
+    scheduler: simple
+    shift_video: 12
+    shift_audio: 3
+    cfg: null                       # BasicGuider，无 CFG 概念
+    min_tier: t16
+    verdict: >
+      融合思路最正确（一个文件双模式），但 21GB 对 10GB 卡偏大，
+      且 r1024 SVD 近似意味着 ref2va 能力是「近似还原」而非原生。
+      16GB+ 档位首选；10GB 档位作为次选（可用但慢）。
+
+  # ---- 候选 B：DaSiWa Hybrid Turbo v3（推荐主力） ----
+  dasiwa_hybrid_turbo_v3_int8:
+    file: "dasiwa_minimax_h3_ref2va_v3_pruned_hybrid_turbo_int8_row-wise_convrot_runtime_mixed.safetensors"
+    size_bytes: 20_480_000_000
+    source: "https://civitai.com/models/2877206/dasiwa-minimax-h3?modelVersionId=3374439"
+    kind: hybrid                    # hybrid = REF2VA + FL2VA 双兼容
+    modes: [t2va, i2va, l2va, fl2va, ref2va]
+    turbo: fused
+    recommended_steps: [4, 8]
+    sampler: [euler, res_multistep]
+    scheduler: simple
+    shift_video: [6, 12]            # 作者文档建议 6-12；其示例工作流实际用 12
+    shift_audio: [3, 5]
+    cfg: null
+    min_tier: t16
+    verdict: >
+      与 DaSiWa-Nodes 的 MiniMaxH3Director 同源，Director 一个节点暴露全部模式，
+      最容易做 Agent 驱动的参数化。10GB 档位请用 int4 版本。
+
+  dasiwa_hybrid_turbo_v3_int4:
+    file: "dasiwa_minimax_h3_ref2va_v3_pruned_hybrid_turbo_int4.safetensors"
+    size_bytes: 12_250_000_000
+    source: "https://civitai.com/models/2877206/dasiwa-minimax-h3?modelVersionId=3374439"
+    kind: hybrid
+    modes: [t2va, i2va, l2va, fl2va, ref2va]
+    turbo: fused
+    recommended_steps: [4, 8]
+    sampler: euler
+    scheduler: simple
+    shift_video: [6, 12]
+    shift_audio: [3, 5]
+    min_tier: t10
+    verdict: "★ 10GB 档位主力候选：12.25GB，比 int8 少搬 40% 字节。"
+
+  # ---- 候选 C：Singularity（质量优先，hero shot） ----
+  singularity_ref2va_pruned_w4a8:
+    file: "Minimax-h3_Singularity_ref2va_v1.3_Pruned_w4a8.safetensors"
+    size_bytes: 11_800_000_000
+    source: "https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity"
+    kind: finetuned                 # 非 LoRA，是融合+深度微调后的完整权重
+    modes: [t2va, i2va, ref2va, v2va]
+    turbo: none                     # 需外挂 turbo LoRA
+    recommended_steps: 20           # 非蒸馏；作者推荐搭配 ref2v turbo 4step 可降到 4
+    sampler: res_multistep
+    scheduler: simple
+    shift_video: 12
+    shift_audio: 3
+    min_tier: t10
+    strengths:
+      - "HDR 画质 / 去运动模糊"
+      - "远景人脸修复（中远景不再崩脸）"
+      - "去油光去塑料感"
+      - "武打/冷兵器/奇幻 VFX"
+      - "100% 保留原模型 prompt adherence"
+    verdict: >
+      ★ 唯一在「人脸质量」上明确做过微调的权重，且 11.8GB 是全部候选里最小的。
+      10GB 档位的 hero shot / 人物特写首选；缺点是未融合 turbo，速度靠外挂 LoRA。
+
+  singularity_ref2va_pruned_int8:
+    file: "Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors"
+    size_bytes: 21_000_000_000
+    source: "https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity"
+    kind: finetuned
+    turbo: none
+    min_tier: t24
+
+  # ---- 候选 D：原版 Comfy-Org 重打包（对照基线） ----
+  official_int8_convrot:
+    file_fl2va: "minimax_h3_fl2va_int8_convrot.safetensors"
+    file_ref2va: "minimax_h3_ref2va_int8_convrot.safetensors"
+    size_bytes: 20_000_000_000
+    source: "https://huggingface.co/Comfy-Org/MiniMax-H3"
+    kind: official
+    modes: [t2va, i2va, fl2va]      # fl2va 权重；ref2va 需换另一个文件
+    turbo: none
+    recommended_steps: 20
+    min_tier: t24
+    verdict: >
+      质量基线/对照组。缺点致命：FL2VA 与 Ref2VA 是两个独立 ~20GB 文件，
+      10GB 卡上切换任务要重新加载，不现实。只作 A/B 对照用。
+
+  # ---- 候选 E：你本地的 hybrid（来源待确认） ----
+  local_hybrid_b25_49_int8:
+    file: "minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors"
+    size_bytes: 20_970_379_632
+    source: "https://huggingface.co/smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models"
+    kind: hybrid
+    modes: [fl2va, ref2va]
+    turbo: none
+    min_tier: t16
+    verdict: "疑似 smhfacct 的 hybrid 系列（b25-49 为 block 区间）。已下载，待实测。"
+
+# -----------------------------------------------------------------------------
+# 3. 配套模型
+# -----------------------------------------------------------------------------
+support_models:
+  text_encoders:                    # models/text_encoders/
+    qwen3vl_32b_int8_convrot: {file: "qwen3vl_32b_minimax_h3_int8_convrot.safetensors", size_gb: 27.1}
+    qwen3vl_32b_nvfp4_awq:    {file: "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",    size_gb: 15.7, note: "不需要 Blackwell"}
+  vae:                              # models/vae/
+    official_fp16:            {file: "minimax_h3_video_vae_fp16.safetensors",           size_gb: 5.21}
+    official_int8_convrot:    {file: "minimax_h3_video_vae_int8_convrot.safetensors",   size_gb: 2.81, note: "需 ComfyUI>=0.36 才有约 2x 提速"}
+    lynnreal_light_int8_convrot: {file: "minimax_h3_lynnreal_light_vae_int8_convrot.safetensors", size_gb: 2.14,
+                                  note: "Kijai 对 stdstu123/LynnReal-Onmi-light-vae 的 int8-convrot 量化，解码再快 1.3x"}
+    audio_fp32:               {file: "minimax_h3_audio_vae_fp32.safetensors",           size_gb: 0.605, note: "REF2VA 必需"}
+    taeh3_preview:            {file: "taeh3.safetensors", note: "预览用"}
+  turbo_loras:                      # models/loras/  （未融合 turbo 的权重才需要）
+    fl2v_turbo_4step:  "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors"
+    fl2v_turbo_8step:  "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors"
+    ref2v_turbo_4step: "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors"
+
+# -----------------------------------------------------------------------------
+# 4. 稀疏注意力方案（互斥，只能选一个）
+# -----------------------------------------------------------------------------
+sparse_attention:
+  sla:
+    status: native                  # ComfyUI 原生
+    node: "Model Sparse Attention"  # node_id: BlockSparseAttention, category model/patch
+    method: sol-attn                # base 权重用 sol-attn；另有 sla / vsa
+    params:
+      tau: 1.3                      # sol-attn
+      keep_percent: 10.0            # sla / vsa 模式
+      start_percent: 0.2
+      end_percent: 1.0
+      min_tokens: 12288
+      extra_tokens: 256
+      sink_conditioning: exact_kv_and_rows   # H3 专用，保住 reference rows 与音频质量
+    speedup: "1.96x – 3.13x"
+    verdict: "★ 默认方案。零下载、原生、H3 官方教程推荐。"
+
+  veda:
+    status: plugin                  # 需装插件
+    package: "veda-sparse-attention"
+    install: "comfy node install veda-sparse-attention"
+    requires_comfyui: ">=0.38.0"
+    node: "Veda Sparse Attention (MiniMax H3)"
+    params:
+      predictor: "models/veda/minimax_h3_t2va_veda_8nfe_600step_preview_fp8.safetensors"  # 275MB
+      generated_sparsity: 90
+      reference_sparsity: 90
+    speedup: "注意力部分 7.1x，端到端 2.9x（RTX 5070 12GB）"
+    conflict: "★ 与原生 Model Sparse Attention 互斥：同时挂会让 Veda 永不生效"
+    verdict: "画质/速度上限更高，但需 ComfyUI>=0.38 且不能与 SLA 共存。"
+
+  jev:
+    status: REJECTED
+    reason: >
+      JEV 不是注意力方案，是 TypeSafe AI 的决策模型（按层分配 keep 率，需 TYPESAFE_API_KEY 云端调用）。
+      实测：固定 5% = 212.20s，Jev 自适应 = 219.15s —— 反而慢 6.95s。
+      fourthplace43 反向测试证明它并没真正「看懂」层（翻转层描述文字 → 分配结果完全镜像）。
+    decision: "砍掉。本项目所有涉及 JEV 的命名统一改为 SLA，避免误导。"
+
+  x2_stream:
+    status: plugin
+    package: "ComfyUI-H3-X2-Stream"
+    layer: "VAE / 编码 IO（不是注意力）"
+    nodes: ["H3 X2 Prepare INT8 VAE", "H3 X2 Decode + Stream Save", "H3 Chunk FeedForward (X2 Stream)"]
+    note: "解码与 NVENC 编码异步重叠流式落盘；124f@24fps 544x960→1088x1920 带音频约 59.7s"
+    verdict: "正交方案，可与 SLA 叠加，10GB 档位强烈建议启用。"
+
+# -----------------------------------------------------------------------------
+# 5. 工作流变体矩阵（由 build_workflow.py 从模板生成，不手工维护）
+# -----------------------------------------------------------------------------
+workflow_variants:
+  # 命名规则：h3_{attention}_{turbo}
+  h3_sla_fused:     {attention: sla,  turbo: fused,  steps: 4,  note: "默认。融合权重 + 原生 SLA"}
+  h3_sla_lora:      {attention: sla,  turbo: lora,   steps: 4,  note: "非融合权重 + 外挂 turbo LoRA"}
+  h3_sla_none:      {attention: sla,  turbo: none,   steps: 20, note: "质量基线，慢，仅 hero shot"}
+  h3_veda_fused:    {attention: veda, turbo: fused,  steps: 4,  note: "需 ComfyUI>=0.38"}
+  h3_veda_lora:     {attention: veda, turbo: lora,   steps: 4}
+  h3_veda_none:     {attention: veda, turbo: none,   steps: 20}
+  h3_dense_fused:   {attention: none, turbo: fused,  steps: 4,  note: "A/B 对照用"}
+  h3_dense_lora:    {attention: none, turbo: lora,   steps: 4}
+  h3_dense_none:    {attention: none, turbo: none,   steps: 20}
+
+# -----------------------------------------------------------------------------
+# 6. 设定图模型（支线 A / B）
+# -----------------------------------------------------------------------------
+setting_image_models:
+  qwen_image_2_1:
+    role: "★ 设定图生成器（主角/配角定妆照、场景板、首尾帧）"
+    variant: 官方原版 int8_convrot      # 不要用风格化社区微调版
+    files:
+      diffusion_models: "qwen_image_2.1_int8_convrot.safetensors"   # 7.26GB（bf16 为 14.2GB）
+      text_encoders: "qwen3vl_8b_int8_convrot.safetensors"
+      vae: "qwen_image_2.1_vae_bf16.safetensors"
+    comfyui: native                     # Day-0 原生，无需插件
+    nodes: ["UNETLoader", "CLIPLoader(type=qwen_image)", "VAELoader",
+            "TextEncode Qwen Image 2.1(最多16图槽)", "Qwen Image 2.1 Cache", "ResolutionSelector"]
+    steps: 25                           # 官方默认 40；ComfyUI 模板 25
+    cfg: 1
+    sampler: euler
+    scheduler: simple
+    max_reference_images: 10            # ComfyUI 节点最多 16 槽，模板接前 10
+    native_resolution: "2K；官方含 9:16 = 1536x2752"
+    why: "身份一致性（多图参考）+ 中文文字渲染（字高>=20px 稳定）——这两项正是 H3 REF2VA 的硬需求"
+    license: "Qwen Research License，仅非商用 ⚠️"
+
+  krea_2:
+    role: "风格板 / 氛围参考 / 封面海报（不是设定图生成器）"
+    variant: 官方 Turbo
+    files:
+      diffusion_models: "krea2_turbo_fp8_scaled.safetensors"
+      text_encoders: "qwen3vl_4b_fp8_scaled.safetensors"
+      vae: "qwen_image_vae.safetensors"
+      loras: "krea2_style_reference.safetensors"
+    steps: 8
+    cfg: 0                              # 官方 Turbo；RAW 才是 CFG 3.5 / 52 步
+    resolution: "1536x1536（训练上限 1024px，无原生 2K）"
+    why_not_for_setting: "官方把『通用 image reference』列为未来工作，当前只支持风格参考 → 做不了角色一致性"
+    license: "年营收 < 100 万美元可免费商用"
+
+  dasiwa_krea2_darkdesire_v3_turbo_uc:
+    role: "特定题材（暗黑/奇幻/NSFW）风格引擎 —— 已下载 int4 + int8"
+    steps: 8
+    cfg: 1                              # 作者实测取向（与官方 CFG 0 不同）
+    sampler: [euler, er_sde]
+    scheduler: [linear_quadratic, simple]
+    resolution: "1536x1536"
+    why_not_for_setting: "Unchained/NSFW 取向与中性设定图冲突，且不补 identity 参考能力"
+
+# -----------------------------------------------------------------------------
+# 7. 参考资产硬限制（H3 官方）
+# -----------------------------------------------------------------------------
+h3_reference_limits:
+  ref2va:
+    images: 9
+    videos: 3
+    audio: 3
+    total_files: 12
+    per_clip_seconds: [2, 15]
+    total_seconds: 15
+  fl2va: {images: [0, 2]}               # 0 张 = T2VA；1 张 = I2VA；2 张 = 首尾帧
+  output:
+    duration_seconds: [4, 15]
+    fps: 24
+    short_edge_px: 768
+    audio: "32kHz 立体声"
+    aspect_ratios: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]

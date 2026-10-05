@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ShotList",
+  "description": "分镜清单。director Bot 的产出，prompt-smith 的输入。",
+  "type": "object",
+  "required": ["project", "aspect_ratio", "fps", "shots"],
+  "properties": {
+    "project": { "type": "string" },
+    "aspect_ratio": {
+      "type": "string",
+      "enum": ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
+      "default": "9:16"
+    },
+    "fps": { "type": "integer", "enum": [24], "default": 24 },
+    "style_bible": {
+      "type": "string",
+      "description": "全局风格定调，1-2 句英文。会写在 [Shot 1] 之前。"
+    },
+    "characters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["subject_id", "name", "appearance"],
+        "properties": {
+          "subject_id": { "type": "string", "description": "如 S1，对应 H3 的 <Subject N>" },
+          "name": { "type": "string" },
+          "appearance": { "type": "string", "description": "英文外貌描述，用于出设定图" },
+          "setting_images": {
+            "type": "array",
+            "items": { "type": "string" },
+            "maxItems": 9,
+            "description": "设定图文件名；同一角色建议 正面/侧面/背面/服装细节 四张"
+          }
+        }
+      }
+    },
+    "shots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["shot_id", "duration_s", "mode"],
+        "properties": {
+          "shot_id": { "type": "string" },
+          "duration_s": {
+            "type": "number", "minimum": 4, "maximum": 15,
+            "description": "H3 输出时长限制 4-15 秒"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["t2va", "i2va", "l2va", "fl2va", "ref2va"]
+          },
+          "description": { "type": "string", "description": "画面描述，英文" },
+          "camera": { "type": "string" },
+          "characters_in_shot": {
+            "type": "array", "items": { "type": "string" },
+            "description": "本镜出现的 subject_id"
+          },
+          "require_identity_fidelity": {
+            "type": "boolean", "default": false,
+            "description": "★ true 时禁止 4 步（官方已知漂移问题）"
+          },
+          "start_at_s": { "type": "number", "description": "在成片中的起始时间" },
+          "dialogue": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "speaker": { "type": "string", "description": "S1 / S2" },
+                "text": { "type": "string" },
+                "lang": { "type": "string", "default": "English" }
+              }
+            }
+          },
+          "soundscape": { "type": "string", "description": "对应 overall_soundscape" },
+          "music": { "type": "string", "description": "对应 non_diegetic_music" },
+          "reference_assets": {
+            "type": "object",
+            "properties": {
+              "images": { "type": "array", "items": { "type": "string" }, "maxItems": 9 },
+              "videos": { "type": "array", "items": { "type": "string" }, "maxItems": 3 },
+              "audio":  { "type": "array", "items": { "type": "string" }, "maxItems": 3 }
+            },
+            "description": "REF2VA 限额：图<=9 视频<=3 音频<=3 总<=12"
+          }
+        }
+      }
+    }
+  }
+}

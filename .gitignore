@@ -1,0 +1,35 @@
+# 产物
+out/
+workflows/*.json
+!workflows/.gitkeep
+
+# 账本与日志
+orchestrator/jobs.db
+out/_logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 模型（绝不入库）
+*.safetensors
+*.gguf
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.onnx
+
+# 媒体
+*.mp4
+*.webm
+*.png
+*.jpg
+*.webp
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
