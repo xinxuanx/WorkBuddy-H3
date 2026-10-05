@@ -1,5 +1,7 @@
 # WorkBuddy H3 — Agent + ComfyUI 全自动短视频生产线
 
+**仓库：<https://github.com/xinxuanx/WorkBuddy-H3>**
+
 > 目标：**换任何一个 Agent 框架，读完本仓库都能把这条生产线跑起来。**
 > 主生成模型：MiniMax-H3（33B 单流 Omni-Transformer，视频+音频联合生成）
 > 参考图模型：Qwen-Image-2.1（设定图/角色一致性/文字）
