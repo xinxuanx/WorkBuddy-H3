@@ -49,7 +49,8 @@ F:\Agent H3\
 │   ├── 05-AGENT-AND-BOT-MODE.md   Agent 框架与 Hermes Bot Mode 的真实作用
 │   ├── 06-WORKFLOW-MATRIX.md      工作流矩阵（SLA/Veda × fused/lora/none）
 │   ├── 07-SOURCES.md              全部调研资料与出处
-│   └── 08-RUNBOOK.md              执行手册
+│   ├── 08-RUNBOOK.md              执行手册
+│   └── 09-NODE-INVENTORY.md       ★ 实测节点清单（从你本地可跑的工作流提取）
 ├── agent/
 │   ├── SKILL.md                   给 Agent 加载的执行手册
 │   ├── TOOL-CONTRACT.md           工具契约（换 Agent 只改这一层）
