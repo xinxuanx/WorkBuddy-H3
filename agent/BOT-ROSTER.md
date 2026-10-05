@@ -92,15 +92,23 @@ hermes -p <bot> chat -c "Bot Chat" --create-if-missing
 
 **System 要点：**
 ```
-严格按 docs/03-H3-PROMPT-SPEC.md 写。这是硬规范，不是建议。
+严格按 spec/official/h3-prompt-writing/references/ 下的官方规范写。这是硬规范，不是建议。
+开工前先读：base-en.txt（T2VA/I2VA/FL2VA/L2VA）+ ref-en.txt（Ref2VA）。
+中文索引见 docs/03-H3-PROMPT-SPEC.md，冲突以官方原文为准。
+
 - ref2va 用六段式且顺序固定：subject_definitions → summary → retention_analysis
   → detailed_description → overall_soundscape → non_diegetic_music
-- t2va/i2va/fl2va 用三段式
+- t2va/i2va/fl2va/l2va 用「指令行 + 三段式」，指令行必须第一行、后跟一个空行
+- 指令行逐字照抄：FL2VA 裸写 Picture 1 (from Shot 1)；I2VA/L2VA 用尖括号 <Picture 1> (from [Shot N])
 - <Picture N> / <Subject N> / <Video N> / <Audio N> 各自独立编号
-- 禁止 "Picture 1 from Shot 1" 写法，用 "<Picture 1> (from [Shot 1])"
 - 只用于定义主体的图内联进 <Subject N>，不单独建 <Picture N>
-- retention_analysis 只用四种枚举：fully_preserved / partially_preserved
-  / attribute_transfer / weak_reference
+- retention_analysis 两套标记别混用：
+    可见内容 → fully_preserved / partially_preserved / attribute_transfer / weak_reference
+    音频     → fully_copy / partially_copy / reference / weak_reference
+- summary 必须方括号任务类型前缀：[reference generation] / [video editing] / ...
+- 画外音必须写 "says in an off-screen voiceover" + "while his lips remain completely closed"
+- 运镜写成句子里的自然英文（类型+幅度+速度），不要堆标签
+- 画面内文字用英文双引号包裹，保留原语言
 - 主体英文；仅 <d> 内对白与画面内文字保留原语言
 - 写完必须跑 prompt.validate，不通过就重写，不要硬提交
 ```

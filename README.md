@@ -10,6 +10,13 @@
 
 ---
 
+> 📦 **MiniMax 官方提示词技能已内置**：`spec/official/h3-prompt-writing/`
+> 来自 `MiniMax-AI/MiniMax-H3` 的 `.agents/skills/` 与 `.claude/skills/`（两份完全相同）。
+> 官方 frontmatter 明写 "Portable to any agent that can read local files … does not restrict the
+> skill to OpenAI agents" —— **可直接装进 Claude Code / Hermes / 任意框架**。
+> 权威规范是 `references/base-en.txt`（222 行）与 `references/ref-en.txt`（341 行），
+> **与本文档冲突时以它们为准**。
+
 ## 0. 三句话结论（先读这个）
 
 1. **H3 基座选「融合/混合权重」，不选原版。** 你只有 RTX 3080 10GB，原版 FL2VA 与 Ref2VA 是两个各约 20GB 的独立权重，切换任务就要换模型；融合权重一个文件同时跑两种模式，是 10GB 卡上唯一现实的选择。（详见 [docs/02-MODEL-SELECTION.md](docs/02-MODEL-SELECTION.md)）
@@ -57,6 +64,11 @@ F:\Agent H3\
 │   ├── SKILL.md                   给 Agent 加载的执行手册
 │   ├── TOOL-CONTRACT.md           工具契约（换 Agent 只改这一层）
 │   └── BOT-ROSTER.md              多 Bot 角色分工定义
+├── spec/
+│   ├── official/                  ★ MiniMax 官方 h3-prompt-writing 技能（原样 vendored）
+│   │   └── h3-prompt-writing/{SKILL.md, references/base-en.txt, references/ref-en.txt, agents/openai.yaml}
+│   ├── shotlist.schema.json       分镜清单结构定义
+│   └── prompt_recipe.md           提示词配方（含逐字照抄的指令行）
 ├── comfy/
 │   ├── adapter/comfy_client.py    ComfyUI 客户端（提交/监听/取件/重试）
 │   ├── build_workflow.py          模板 → API JSON 构建器

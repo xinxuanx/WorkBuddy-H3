@@ -10,6 +10,7 @@
 | 仓库 | 关键事实 | 状态 |
 |---|---|---|
 | **MiniMax-AI/MiniMax-H3** | 33B dense 单流 Omni-Transformer；AdaLN + MM-RoPE(t,h,w)；联合预测 video+audio latent；H3-Encoder 基于 Qwen3-VL-32B 取第 50 层 hidden states；VisualVAE `f16t4d24`；输出 4–15s/24FPS/短边 768/32kHz 立体声；两个 checkpoint：`FL2VA` 与 `Ref2VA` | ✅ |
+| **MiniMax-AI/MiniMax-H3 的 `.agents/skills/` 与 `.claude/skills/`** | ★ **官方提示词技能 `h3-prompt-writing`**，两份字节数完全相同的副本。`SKILL.md`(2177B) + `references/base-en.txt`(15773B，222 行) + `references/ref-en.txt`(23553B，341 行) + `agents/openai.yaml`(240B)。frontmatter 明写 "Portable to any agent that can read local files … does not restrict the skill to OpenAI agents"。**已原样 vendored 到 `spec/official/`** | ✅ |
 | **QwenLM/Qwen-Image-2.1** | 2026-09-20 发布，统一文生图+图像编辑（同一权重、同一 `QwenImage21Pipeline`）；7B/32 层 Single-Stream DiT + Qwen3-VL 8B 编码器 + 64 通道 RGBA VAE；原生 2K；最多 10 张参考图 | ✅ |
 | **krea-ai/krea-2** | 2026-06-22，12B DiT，单流 MMDiT + rectified flow；发布 RAW + Turbo 两个完整 checkpoint；HF gated access；**通用 image reference 列为未来工作，当前只支持风格参考**；训练上限 1024px，无原生 2K | ✅ |
 | **Comfy-Org/ComfyUI** | v0.38.0（2026-09-29）；新前端默认；Job API `/api/jobs`；`--fast` 是实验性枚举（`fp16_accumulation`/`fp8_matrix_mult`/`cublas_ops`/`autotune`），帮助文本明写 "untested and potentially quality deteriorating" | ✅ |

@@ -1,242 +1,363 @@
 # 03 — H3 提示词与设定图规范
 
-> **这是 Agent 写提示词时的唯一规范。不按这个写，H3 会明显退化。**
-> 来源：MiniMax-AI/MiniMax-H3 官方 README + `skills/h3-prompt-writing/references/ref-en.txt`
-> + Comfy-Org 官方教程 + DaSiWa Director 文档。
+> **权威来源已原样 vendored 到本仓库：**
+> - `spec/official/h3-prompt-writing/SKILL.md`
+> - `spec/official/h3-prompt-writing/references/base-en.txt`（T2VA/I2VA/FL2VA/L2VA，222 行）
+> - `spec/official/h3-prompt-writing/references/ref-en.txt`（Ref2VA 全参考模式，341 行）
+> - `spec/official/h3-prompt-writing/agents/openai.yaml`
+>
+> 来源：`github.com/MiniMax-AI/MiniMax-H3` 的 `.agents/skills/` 与 `.claude/skills/`。
+> **本文档是那两份规范的中文索引；有冲突时以 `spec/official/` 原文为准。**
 
 ---
 
-## 1. 两种提示词结构（按模式区分，不能混用）
+## 0. 官方技能：有，且可直接安装
 
-### A. T2VA / I2VA / FL2VA —— 三段式
-
-```
-integrated_multimodal_description: <画面描述，含分镜>
-overall_soundscape:               <环境音/音效>
-non_diegetic_music:               <配乐>
-```
-
-- `non_diegetic_music` 留空时系统自动写 N/A。
-- `[Shot 1]` **不带时间戳**；后续镜头写 `[Shot N] At 00:04.500, ...`。
-- 在 `[Shot 1]` 之前用 **1–2 句英文先定风格**。
-- 生成任务通常 **350–500 英文词**。
-
-### B. REF2VA —— 六段式，**顺序固定，不可打乱**
+仓库里有**两份完全相同**的技能副本（字节数一致）：
 
 ```
-subject_definitions    → 主体定义（人物/物体/场景，绑定参考图）
-summary                → 摘要
-retention_analysis     → 保留度分析（每个参考被保留到什么程度）
-detailed_description   → 分镜详述
-overall_soundscape     → 环境音
-non_diegetic_music     → 配乐
+.agents/skills/h3-prompt-writing/     ← 通用 Agent 约定（AGENTS.md / agentskills.io 风格）
+.claude/skills/h3-prompt-writing/     ← Claude Code 约定
 ```
+
+官方 frontmatter 原文明确写了它**不绑定任何厂商**：
+
+> compatibility: Portable to any agent that can read local files — no external API calls,
+> MiniMax Hub tools, or proprietary runtime required. The `agents/openai.yaml` file only adds
+> optional ChatGPT/Codex UI metadata; **it does not restrict the skill to OpenAI agents**.
+
+### 安装
+
+| 目标 | 做法 |
+|---|---|
+| **Claude Code** | `cp -r spec/official/h3-prompt-writing ~/.claude/skills/`（或项目级 `.claude/skills/`） |
+| **Hermes Agent** | 技能兼容 `agentskills.io` 开放标准 → 放到 Hermes 的 skills 目录即可 |
+| **本项目的 Bot** | 直接让 Bot 读 `spec/official/h3-prompt-writing/references/*.txt`（见 `agent/BOT-ROSTER.md` 的 `prompt-smith`） |
+| **任意框架** | 复制目录，在 system prompt 里指向 `SKILL.md` |
+
+`agents/openai.yaml` 只是 UI 元数据（显示名 + 默认提示词 `$h3-prompt-writing`），**删掉也不影响**。
+
+### SKILL.md 的工作流（原文）
+
+1. 识别输入模式：T2VA / I2VA / FL2VA / L2VA / Ref2VA
+2. base 文本/关键帧模式 → 读 `references/base-en.txt`
+3. 全参考模式 → 读 `references/ref-en.txt`
+4. **保持字段名、段落顺序、标签、时间记法与所选指南完全一致**
 
 ---
 
-## 2. 标签语法（严格）
+## 1. Base 模式（T2VA / I2VA / FL2VA / L2VA）
 
-### 编号体系
+### 1.1 最终结构：**指令行 + 空行 + 三个核心字段**
 
-| 标签 | 用途 | 独立编号 |
+> ⚠️ **指令必须是 prompt 的第一行，后跟一个空行，然后才是核心字段。**
+
+| 模式 | 指令行（**逐字照抄**，只替换 N 和 S.SS） |
+|---|---|
+| **T2VA** | *无指令行*，直接开始三个核心字段 |
+| **I2VA** | `For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.` |
+| **FL2VA** | `How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot N) aligns with the S.SS-second mark of the target video.` |
+| **L2VA** | `How the reference pictures align with the target video — <Picture 1> (from [Shot N]) aligns with the S.SS-second mark of the target video.` |
+
+> 🔴 **尖括号用法不一致，别写错：**
+> - **I2VA / L2VA 用尖括号**：`<Picture 1>`、`[Shot 1]`
+> - **FL2VA 不用尖括号**：`Picture 1 (from Shot 1)` —— 官方原文就是裸写
+>
+> `N` = 实际最后一个镜头的序号；`S.SS` = 有效时长，**精确到两位小数**。
+
+### 1.2 三个核心字段
+
+```text
+integrated_multimodal_description: [Shot 1] ...
+
+overall_soundscape: ...
+
+non_diegetic_music: ...
+```
+
+| 字段 | 内容 | 长度 |
 |---|---|---|
-| `<Picture N>` | 参考图片 | ✅ 与其它类别互不相干 |
-| `<Subject N>` | 主体（人物/物体） | ✅ |
-| `<Video N>` | 参考视频 | ✅ |
-| `<Audio N>` | 参考音频 | ✅ |
+| `integrated_multimodal_description` | 画面、动作、镜头、说话人、对白、演唱、以及**故事内（diegetic）声音**，按时间线展开 | 主体 |
+| `overall_soundscape` | 全片的环境音、物理动作声、非语言人声 | **1–4 句英文**，一段连续文字 |
+| `non_diegetic_music` | 角色听不到、只有观众能听到的配乐 | **1–3 句英文** |
 
-> **各类别独立编号。** `<Picture 1>`、`<Subject 1>`、`<Video 1>` 可以同时存在且互不指代。
+**N/A 规则（不是"留空就行"）：**
+- `overall_soundscape` 用 `N/A` —— **仅在用户明确要求全片静音时**
+- `non_diegetic_music` 用 `N/A` —— 无配乐时
 
-### ⚠️ 常见错误写法（官方明确否定）
+> 对白、演唱、以及角色能听到的装置音乐（收音机/电视/手机）属于 **diegetic**，
+> 必须写在 `integrated_multimodal_description` 里，**不能**放进 `non_diegetic_music`。
 
+### 1.3 四种 base 模式的写法差异
+
+| 模式 | 图片角色 | 官方推荐结构 |
+|---|---|---|
+| **T2VA** | 无图，纯文本构建完整时间线 | — |
+| **I2VA** | `<Picture 1>` = 0.00s 的实际首帧，属 `[Shot 1]` | 首帧锚点 → 动作起始 → 持续发展 → 结果/反应 |
+| **FL2VA** | Picture 1 开头、Picture 2 结尾 | 首帧状态 → 可见的中间变化 → 差异逐步收窄 → 尾帧状态 |
+| **L2VA** | `<Picture 1>` = **最后一帧**，属最后的 `[Shot N]`，**不属于 Shot 1** | 合理的前置状态 → 明确的动作与过渡路径 → 最后一镜逐步收敛 → 尾帧落地 |
+
+> **FL2VA 官方明确倾向单镜头**（"generally favors a single shot"），只有用户明确要求时才多镜。
+> **L2VA 要靠推断**：从尾帧反推一个合理的前置状态，再逐步收敛到尾帧。
+
+### 1.4 风格定调的位置（两种模式不一样）
+
+- **Base 模式**：风格写在 `[Shot 1]` **之后** —— `[Shot 1] Live-action, cinematic, a medium-wide shot frames...`
+- **Ref2VA**：风格写在 `[Shot 1]` **之前**，用 1–2 句英文单独成段
+
+常用风格词：`Cinematic` / `live-action` / `2D-animated` / `3D CG` / `claymation` / `watercolor` / `vintage film`
+（有参考图时**从参考图推导**风格，不要自己选）
+
+### 1.5 分镜与剪切
+
+- **`[Shot 1]` 不加时间戳**；后续 `[Shot N] At MM:SS.mmm, ...`，时间严格递增且落在片长内
+- 普通剪切用：`the camera cuts to` / `the shot cuts to` / `the shot transitions to` / `the shot changes to` / `the shot switches to`
+- 交叉溶解、淡入淡出、划变**仅在用户明确要求时**使用
+- 一次剪切必须带来新信息（主体/空间/状态/视点/时间）；只改距离或轻微角度请**用运镜**
+
+### 1.6 运镜：类型 + 幅度 + 速度（三维）
+
+| 维度 | 可用表达 |
+|---|---|
+| **类型** | `Zoom In/Out`（变焦，机身不动）、`Push In/Pull Out`（推拉，机身移动）、`Pan Left/Right`（原地水平摇）、`Truck Left/Right`（水平平移）、`Tilt Up/Down`（原地垂直摇）、`Pedestal Up/Down`（整机升降）、`Arc Shot`（环绕）、`Tracking Shot`（跟拍）、`Static Shot`（全静止）、`Shake Slightly/Strongly`、`POV`、`Roll Clockwise/Counterclockwise` |
+| **幅度** | `with small amplitude` / `with large amplitude` |
+| **速度** | `at slow speed` / `at fast speed` |
+
+> 中等幅度、正常速度**通常省略**。
+> **必须写成句子里的自然英文动作，不要在句末堆标签**：
+> ```
+> ✅ The camera pushes in with small amplitude at slow speed toward the folded letter in her hands.
+> ❌ ... [push_in, small, slow]
+> ```
+
+### 1.7 说话人、对白、演唱
+
+- 稳定 ID：`(S1)` `(S2)`；多人同时说/唱用复合 ID `(S1,S2)`
+- **同一说话人跨镜头保持同一 ID**；不发声的角色不给 ID
+- 说话人首次出现时，要在 `<d>` **外面**给足身份信息（角色类型、年龄、性别、是否出画、音高、音色、语速、口音）
+- `<d>` 内**只放语言标签 + 原始对白**，逐字保留原文与标点，**不翻译不改写**
+  ```text
+  The young woman with a quiet, breathy voice (S1) says: <d>[English] I get off at the next station.</d>
+  The two children (S1,S2) shout together, <d>[English] Wait for us!</d>
+  ```
+- **画外音**：必须用固定短语 `says in an off-screen voiceover`，且紧接着声明**嘴唇闭合**
+  ```text
+  The man (S1) says in an off-screen voiceover: <d>[English] I still remember that road.</d> while his lips remain completely closed.
+  ```
+- **对白跨剪切**：两段连接处都用 `<scenetrans>`，并显式说明声音跨镜连续
+  （`continues seamlessly across the cut` / `continues uninterrupted into the next shot` /
+  `carries over from the previous shot` / `remains audible across the transition`）
+- **被片尾截断**的说话用 `<cutoff>`
+- 听不清处写 `[unclear]`，**不要猜**
+- 标点标准化为 `, . ? !`，去掉波浪号、emoji、装饰性重复标点；完整句结尾加 `.`/`?`/`!` 再 `</d>`
+
+### 1.8 画面内文字
+
+横幅、招牌、标签、字幕、霓虹字等**实际出现在画面里**的文字，用**英文双引号**包裹，
+保留原文字与标点，**不翻译**：
+
+```text
+A red neon sign reading "营业中" glows above the doorway.
 ```
-❌ "Picture 1 from Shot 1"        ← 官方指南说没有这种写法
-✅ "<Picture 1> (from [Shot 1])"  ← 正确的归属表达
-```
-
-### 标准句式
-
-```
-# 归属
-<Picture 2> is the first frame of [Shot 1], showing ...
-the shot begins from <Picture 1>
-the shot's keyframe corresponds to <Picture 2>
-the shot ends on <Picture 3>
-
-# 时间锚点（官方 H3-Context-IR 输出格式）
-For the target video, at 0.00 seconds into the target video,
-<Picture 1> (from [Shot 1]) is fully referenced.
-
-# 保留度分析（retention_analysis 段，关系标记只有这四种）
-<Picture 2> ([Shot 1] first frame): fully_preserved - <说明>
-  关系标记枚举：fully_preserved / partially_preserved / attribute_transfer / weak_reference
-```
-
-### 主体绑定（重要）
-
-**如果一张图只是用来定义人物/服装/风格，不要给它建独立的 `<Picture N>` 条目**，
-而是**内联进 `<Subject N>`**：
-
-```
-✅ <Subject 1> is the young woman in <Picture 1>, wearing ...
-❌ <Picture 1> is a portrait of a young woman.  ← 单独建条目会稀释注意力
-```
-
-### 对白与转场
-
-```
-台词：  <d>[English] 台词内容</d>
-说话人： (S1)(S2)
-转场：  <scenetrans>
-截断：  <cutoff>
-```
-
-- 说话人 ID 用 `(S1)(S2)` 标记。
-- `<d>` 标签内可保留原语言；**提示词主体一律英文撰写**。
-
-### 语言规则
-
-- **主体必须英文撰写。**
-- 只有 `<d>` 内对白/歌词、以及画面内文字（招牌/字卡）保留原语言。
-- 官方**没有**给出"中文 vs 英文效果差异"的结论，但规范明确要求英文主体。
 
 ---
 
-## 3. 参考资产硬限制
+## 2. Ref2VA 全参考模式（六段式，顺序固定）
 
-| 模式 | 图 | 视频 | 音频 | 总文件 | 单段时长 | 总时长 |
+```
+subject_definitions → summary → retention_analysis
+→ detailed_description → overall_soundscape → non_diegetic_music
+```
+
+### 2.1 四类标签
+
+| 标签 | 含义 |
+|---|---|
+| `<Subject N>` | 从参考资产抽象出的**可复用可见内容**（人/物/场景/服装/道具/风格/动作/表情/姿态） |
+| `<Picture N>` | 参考图，作为**具体目标帧或分镜锚点** |
+| `<Video N>` | 参考视频，提供剪辑源、续写起点、或整片时间结构 |
+| `<Audio N>` | 被复制或被引用的音频信号 |
+
+> 标签一旦指定，**在全部六个段落中含义保持一致**。
+> `<Video N>` 与 `<Audio N>` **独立编号**，索引不表示配对关系（同一视频可同时是 `<Video 1>` 和 `<Audio 2>`）。
+
+**`<Picture N>` 何时独立建条目**：只有当作**首帧/关键帧/尾帧/编辑关键帧/构图锚点**时才独立；
+若只用来定义角色、场景、服装、风格 → **内联进对应的 `<Subject N>`**，不单建条目。
+
+```text
+✅ <Subject 1> is the young woman in <Picture 1>, with long dark hair, a blue cardigan...
+✅ <Picture 2> is the first frame of [Shot 1], showing a woman seated beside a café window.
+✅ <Picture 3> is a storyboard reference for [Shot 1] and [Shot 2], defining their viewpoint...
+```
+
+### 2.2 `summary` —— **必须以方括号任务类型前缀开头**
+
+| 任务类型 | 何时用 |
+|---|---|
+| `keyframe completion` | 图作为首帧/关键帧/尾帧/编辑关键帧等具体帧锚点 |
+| `reference generation` | 图/视频/音频只提供角色、场景、风格、动作、运镜、分镜等**生成引导**，不是具体帧也不是被编辑/续写的源 |
+| `video editing` | 直接修改已有源视频（编辑图片或在静帧间生成**不算**） |
+| `video continuation` | 从已有源视频末端继续、延长、恢复或转场 |
+| `audio reuse` | 完整或部分复用同一音频信号 |
+| `audio reference` | 不复制信号，只引用音乐风格/音色/对白内容/音效质感/节拍/连续性 |
+
+组合用 ` + `，不重复：
+
+```text
+[reference generation + audio reference] The target video shows <Subject 3> eating a cookie in <Subject 1>...
+[video continuation + keyframe completion] ...
+[video editing + audio reuse] ...
+```
+
+- `summary` 只能用已定义的标签，**不得引入新标签**
+- 编辑类任务在前缀后接：`The target video is an edited version of <Video 1>.`
+- 一段短英文段落即可
+
+### 2.3 `retention_analysis` —— **两套标记，别混用**
+
+**可见内容**（`<Subject N>` / `<Picture N>` / `<Video N>`）：
+
+| 标记 | 含义 |
+|---|---|
+| `fully_preserved` | 定义的角色被完整保留 |
+| `partially_preserved` | 仍在使用，但部分已定义特征被改变或只部分保留 |
+| `attribute_transfer` | 参考特征迁移到另一个可识别的目标主体 |
+| `weak_reference` | 只保留风格/类别/构图/氛围的宽泛相似 |
+
+**音频**（`<Audio N>`）—— 🔴 **是另一套**：
+
+| 标记 | 含义 |
+|---|---|
+| `fully_copy` | 完整源音频作为目标视频的完整最终音轨 |
+| `partially_copy` | 只复制部分时间线或选中音轨层，或复制后有增删替换 |
+| `reference` | 不直接复制，只引用音色/节奏/音乐风格/对白内容/声音质感 |
+| `weak_reference` | 只保留类别或氛围的宽泛相似 |
+
+格式（每个标签一行）：
+
+```text
+<Subject 1> (appears in [Shot 1], [Shot 3]): fully_preserved - ...
+<Picture 2> ([Shot 1] first frame): fully_preserved - ...
+<Video 1> (cut and pacing structure): weak_reference - ...
+<Audio 1>: fully_copy - <Audio 1> is reused 1:1 as the target video's complete final audio track.
+```
+
+> **不要在 `retention_analysis` 里写 `(Sx)`。**
+> 目标视频里新增的动作/背景/情节**不算**参考保真度的损失。
+
+### 2.4 `detailed_description` —— 主体
+
+- 全参考模式的主字段是 **`detailed_description`**（不是 `integrated_multimodal_description`）
+- 风格在 `[Shot 1]` **之前**用 1–2 句英文单独定
+- 生成任务通常 **350–500 英文词**；对白密集时优先保证完整说话时间线，不硬凑字数
+- 视频编辑类描述随源视频复杂度伸缩，不受此字数区间约束
+- 首次出现 `<Subject N>` 时描述其参考特征、画面位置、当前动作；后续镜头沿用同一标签不重新定义
+- 具体帧锚点的自然写法：`the shot begins from <Picture 1>` / `the shot's keyframe corresponds to <Picture 2>` / `the shot ends on <Picture 3>`
+- **说话时要同时保留视觉标签和说话人 ID**：`<Subject 2> (S1) turns toward the woman and says, <d>[English] ...</d>`
+- 被复用的 BGM/完整配乐中的声音提示用 `<Audio N>` 作为声源，**不要凭空发明 `(Sx)`**；
+  由具体人物/角色/旁白发声的才分配 `(Sx)`
+- `retention_analysis` 里不写 `(Sx)`；`(Sx)` 按目标视频中**实际发声事件顺序**分配一次，之后复用
+
+### 2.5 `overall_soundscape` / `non_diegetic_music`
+
+与 base 模式定义一致。使用参考音频时，**在匹配可听层的段落里**说明复制/引用关系：
+
+```text
+overall_soundscape: The copied ambience layer from <Audio 1> continues throughout the target video.
+non_diegetic_music: <Audio 2> is directly reused as the complete audience-only score.
+```
+
+完整对白与歌词只写在 `detailed_description` 的 `<d>` 里，**这两段不重复**。
+
+---
+
+## 3. 参考资产硬限制（官方 README）
+
+| 模式 | 图 | 视频 | 音频 | 总文件 | 单段 | 总时长 |
 |---|---|---|---|---|---|---|
-| **REF2VA** | ≤ 9 | ≤ 3 | ≤ 3 | ≤ 12 | 2–15 s | ≤ 15 s |
+| **Ref2VA** | ≤ 9 | ≤ 3 | ≤ 3 | ≤ 12 | 2–15 s | ≤ 15 s |
 | **FL2VA** | 0 / 1 / 2 | — | — | — | — | — |
 
-输出规格：**4–15 秒 / 24 FPS / 短边默认 768px / 32kHz 立体声**；
-比例支持 21:9、16:9、4:3、1:1、3:4、**9:16**。
+输出：**4–15 秒 / 24 FPS / 短边默认 768px / 32kHz 立体声**；
+比例 21:9、16:9、4:3、1:1、3:4、**9:16**。
 
-> 官方**没有**给出参考图的分辨率上限、宽高比或格式要求（未找到）。
-> 实践建议见下节。
+> 官方**没有**给出参考图的分辨率上限、宽高比或格式要求（未找到）。实践规范见 §4。
 
 ---
 
 ## 4. 设定图实践规范（本项目补充，官方未规定）
 
-由于官方没给设定图规格，这里给出工程上的默认值，**全部落在 `config/registry.yaml`**：
-
 | 项 | 规范 | 理由 |
 |---|---|---|
-| 长宽比 | **与目标视频一致**（竖屏 9:16 就出竖屏设定图） | 避免裁切导致构图错位 |
-| 尺寸 | 9:16 → `1088×1920`（生成）→ 喂入时缩到目标分辨率 | 是 16/32 的倍数，对齐 VAE patchify |
-| 单次批量 | **≤ 4 张** | Qwen-Image-2.1 ≤4 张参考可开 KV cache（3.4× 加速）；10GB 卡显存约束 |
-| 总张数 | 每个主体 ≤ 9 张（对齐 REF2VA 上限） | |
-| 内容分工 | 定妆照（正面/侧面/背面）+ 表情板 + 服装细节 + 场景板 | REF2VA 靠多视角锁定身份 |
-| 文字 | **字高 ≥ 20px** 才稳定（Qwen-Image-2.1 实测硬阈值） | 小于 20px 中文会糊 |
-| 背景 | 主体设定图用**中性/纯色背景**，场景板单独出 | 避免背景被误当成场景参考 |
+| 长宽比 | 与目标视频一致（竖屏 9:16 就出竖屏） | 避免裁切导致构图错位 |
+| 尺寸 | 9:16 → `1088×1920`（生成）→ 喂入时缩到目标分辨率 | 16/32 的倍数，对齐 VAE patchify |
+| 单次批量 | **≤ 4 张** | Qwen-Image-2.1 ≤4 张可开 KV cache（3.4× 加速）；10GB 显存约束 |
+| 总张数 | 每个主体 ≤ 9（对齐 REF2VA 上限） | |
+| 内容分工 | 正面 / 侧面 / 背面 / 服装细节；场景板单独出 | REF2VA 靠多视角锁定身份 |
+| 文字 | **字高 ≥ 20px** 才稳定 | Qwen-Image-2.1 实测硬阈值 |
+| 背景 | 主体设定图用中性/纯色背景 | 避免背景被误当场景参考 |
 
-### 设定图 → H3 的映射建议
+### 设定图 → 标签映射
 
 ```
-Picture 1 = 角色 A 正面定妆照     → <Subject 1> is the ... in <Picture 1>
-Picture 2 = 角色 A 侧面定妆照     → 同上，强化 identity
-Picture 3 = 角色 A 服装细节       → attribute_transfer
-Picture 4 = 场景板                → 单独在 detailed_description 描述
-Picture 5 = 首帧（如做 FL2VA）    → <Picture 5> is the first frame of [Shot 1]
+Picture 1  角色A 正面定妆照  → <Subject 1> is the ... in <Picture 1>
+Picture 2  角色A 侧面定妆照  → 同上，强化 identity
+Picture 3  角色A 服装细节    → attribute_transfer
+Picture 4  场景板            → 单独 <Subject N>，或作 storyboard reference
+（FL2VA）  Picture 5 首帧    → "Picture 5 (from Shot 1) aligns with the 0.00-second mark"
 ```
 
 ---
 
-## 5. 采样参数配方
-
-### 通用
+## 5. 采样参数（与提示词无关，但同一 job 要用对）
 
 | 参数 | 值 | 说明 |
 |---|---|---|
-| 采样器 | `res_multistep` | 官方推荐；MATLOWAI 实测 **4 步下音质优于 euler** |
-| 调度器 | `simple` | |
-| **shift_video** | **12** | 来自模型定义 |
-| **shift_audio** | **3** | 来自模型定义 |
-| CFG | **无** | 走 `BasicGuider`，没有 CFG 概念。别硬塞 CFG 节点 |
+| 采样器 / 调度器 | `res_multistep` / `simple` | 官方推荐；4 步下音质优于 euler |
+| shift_video / shift_audio | **12 / 3** | 来自模型定义 |
+| CFG | **无** | 走 `BasicGuider`，没有 CFG 概念 |
 | denoise | 1.0 | |
-| 分辨率（10GB） | `544×960` | 见 `config/registry.yaml` 档位表 |
+| 分辨率（10GB） | `544×960` | 见 `config/registry.yaml` |
+| 稀疏注意力 | `sink_conditioning = exact_kv_and_rows` | 保住 reference rows 与音频质量 |
 
-### 步数
+**步数**：融合 turbo 权重 **4**；外挂 turbo LoRA 4–8；非 turbo **20**（漂移则 25）。
 
-| 场景 | 步数 | 说明 |
-|---|---|---|
-| 融合 turbo 权重 | **4** | MATLOWAI 原话 "run it at 4 steps" |
-| 外挂 turbo LoRA | 4 或 8 | |
-| 非 turbo（质量优先） | 20（漂移则 25） | 官方默认 |
-| REF2VA + turbo | 4 | ⚠️ 见下方警告 |
+> ⚠️ 官方警告原文：*"at 4 steps a reference can end up barely applied, and a subject's pose or
+> face angle can drift away from the reference"*
+> → `mode=ref2va` 且要求强身份一致时**禁用 4 步**（`build_workflow.py` 已硬校验）。
 
-### ⚠️ 官方明确警告
-
-> *"at 4 steps a reference can end up barely applied, and a subject's pose or face angle can drift away from the reference"*
-
-**翻译：需要紧密跟随设定图时，不要开 4 步 turbo。** 参考会被弱化，人物姿势/脸的角度会漂。
-
-**本项目处置：**
-- `turbo=fused` 且 `mode=ref2va` 且**要求强身份一致** → **强制 8 步或 20 步**，不允许 4 步。
-  这条规则已写进 `comfy/build_workflow.py` 的校验逻辑。
-- 纯氛围/转场/远景镜头可以用 4 步。
-
-### 稀疏注意力
-
-保持 **`sink_conditioning = exact_kv_and_rows`**（H3 专用），以保住 reference rows 与音频质量。
+**负面提示词：官方全文未提及**，且走 `BasicGuider` 无 negative 输入 → **本项目不使用**。
 
 ---
 
-## 6. 负面提示词
+## 6. Agent 自检清单
 
-> **官方 README 与提示词指南均未提及负面提示词（未找到）。**
-> ComfyUI 的 H3 链路走 `BasicGuider`，没有 negative conditioning 输入。
-> **本项目不使用负面提示词。** 想规避的内容直接写进 `detailed_description` 的排除描述里。
+生成后逐条核对：
 
----
+**结构**
+- [ ] Ref2VA 六段式顺序正确？base 模式三段式？
+- [ ] 有参考图时，**指令行是第一行**，后面跟**一个空行**？
+- [ ] 指令行字面写法与模式匹配（**FL2VA 无尖括号**，I2VA/L2VA 有）？
+- [ ] `S.SS` 精确到两位小数？`N` 是实际最后一镜？
 
-## 7. 提示词长度
+**标签**
+- [ ] `<Picture N>` / `<Subject N>` / `<Video N>` / `<Audio N>` 各类独立编号、从 1 连续？
+- [ ] 仅用于定义角色的图已内联进 `<Subject N>`，没单建 `<Picture N>`？
+- [ ] `retention_analysis` 可见内容用 4 种、**音频用另外 4 种**？没混用？
+- [ ] `summary` 有方括号任务类型前缀？没引入新标签？
+- [ ] `retention_analysis` 里没有 `(Sx)`？
 
-官方未给上限（未找到）。参考 token 用量示例：T2VA 8565 / I2VA 22822 / REF2VA 39299（非上限）。
-实践建议：**350–500 英文词**为主体，REF2VA 因六段式会更长，属正常。
+**语言**
+- [ ] 全部改写段是英文？仅 `<d>` 与画面内文字保留原语言？
+- [ ] `<d>` 内逐字保留原文与标点，没翻译？
+- [ ] 画外音用了 `says in an off-screen voiceover` + 声明嘴唇闭合？
+- [ ] 画面内文字用英文双引号包裹？
 
----
+**镜头**
+- [ ] `[Shot 1]` 无时间戳，后续 `At MM:SS.mmm` 严格递增且在片长内？
+- [ ] 运镜写成句子里的自然英文（不堆标签）？
+- [ ] 说话人 ID 跨镜头一致？不发声者无 ID？
 
-## 8. Agent 写提示词的检查清单
-
-生成 H3 prompt 后，逐条自检：
-
-- [ ] 模式匹配：REF2VA 用六段式且顺序正确？T2VA/FL2VA 用三段式？
-- [ ] `<Picture N>` / `<Subject N>` 编号各自独立、从 1 连续？
-- [ ] 没有出现 `Picture 1 from Shot 1` 这种错误写法？
-- [ ] 只用于定义主体的图已内联进 `<Subject N>`，没有单独建 `<Picture N>`？
-- [ ] `retention_analysis` 的关系标记只用四种枚举之一？
-- [ ] 对白用 `<d>` 包裹、说话人用 `(S1)(S2)`？
-- [ ] 主体是英文？仅 `<d>` 和画面内文字保留原语言？
-- [ ] 参考资产数量：图 ≤9、视频 ≤3、音频 ≤3、总 ≤12？
-- [ ] 时长 ≤15 秒？单段参考 2–15 秒？
-- [ ] 若 `mode=ref2va` 且要求强身份一致 → 步数 ≠ 4？
-- [ ] `[Shot 1]` 不带时间戳，后续 `[Shot N] At 00:0X.XXX`？
-
----
-
-## 9. 参考：官方示例（可直接复用为 few-shot）
-
-```
-integrated_multimodal_description:
-[Shot 1] A lone astronaut floats above a neon-lit cyberpunk cityscape at night.
-Rain streaks across their visor reflecting holographic billboards and flying vehicles below.
-[Shot 2] At 00:03.000 the camera pushes in slowly toward the visor as a massive digital
-dragon hologram rises through the clouds behind them, illuminating the scene in pulses of crimson light.
-
-overall_soundscape: Distant rain on metal, faint city hum, synthetic wind, low ambient synth pad underneath.
-non_diegetic_music: Pulsing dark synthwave beat enters at 00:02.000, crescendo when the dragon appears, holding until end.
-```
-
-```
-# FL2VA 首尾帧
-How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns
-with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the
-8.00-second mark of the target video.
-
-integrated_multimodal_description:
-[Shot 1] The dusty desert road stretches empty under a blazing midday sun, heat haze shimmering.
-[Shot 2] At 00:02.000 a vintage red convertible crests the horizon and accelerates toward camera.
-...
-```
+**资产与采样**
+- [ ] 图 ≤9 / 视频 ≤3 / 音频 ≤3 / 总 ≤12？时长 ≤15s、单段 2–15s？
+- [ ] `mode=ref2va` + 强身份一致 → 步数 ≠ 4？
