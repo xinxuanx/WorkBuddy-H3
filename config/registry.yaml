@@ -344,3 +344,73 @@ h3_reference_limits:
     short_edge_px: 768
     audio: "32kHz 立体声"
     aspect_ratios: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]
+
+# -----------------------------------------------------------------------------
+# 8. 设定图规格（★ 官方明文，来源：MiniMax 官方 3d-animation-short-generator 技能）
+#    官方术语：角色卡(character card) / 场景卡(environment card)
+# -----------------------------------------------------------------------------
+setting_image_spec:
+  # ★ 关键：设定图分两类，比例不同，不要混用
+  character_card:                   # 角色卡 / 场景卡 —— REF2VA 的 <Picture N> 主力
+    aspect_ratio: "16:9"            # 官方原文："每张角色卡在可能时为 16:9 生产参考图"
+    why: "要塞下三视图+表情+道具细节+文字标注，横幅空间才够"
+    required_elements:
+      - "角色名标注（英文和/或项目语言）"
+      - "角色定位标注：主角/奶奶/小偷/搭档/施压角色等"
+      - "主 3/4 视角"
+      - "正 / 侧 / 背三视图"
+      - "表情"
+      - "材质 / 服装 / 道具细节"
+      - "重要道具标注：手提包、钱包、滑板、苹果筐、围巾、鞋子、眼镜等"
+      - "提示中重复的『身份锁』"
+      - "简短视觉 ID 备注：年龄段、身材、发型、服饰色、签名道具、不可改特征"
+    scene_card_rule: "场景卡只能展示环境，不出现人物、人群、剪影、手、脸或角色客串"
+    scene_card_elements:
+      - "主环境总览"
+      - "关键光态：日景 / 夜景"
+      - "情绪子空间"
+      - "连续性地标（跨镜头保持屏幕位置的固定物体：厨房中岛、沙发、门框、树、邮筒）"
+      - "环境中的重要道具"
+    lock_warning: "角色卡锁定后修改，需重做镜头表、分镜、片段、正片与最终合成"
+
+  keyframe_image:                   # 首帧 / 尾帧 / 关键帧 —— FL2VA / I2VA / L2VA
+    aspect_ratio: "跟随目标视频"      # 竖屏 9:16 就出 9:16
+    why: "这些要当实际画面用，比例必须对齐否则构图错位"
+
+  # ---- 从 FL2VA/processor/preprocessor_config.json 推导的硬约束 ----
+  hard_constraints:
+    min_pixels: 65536               # shortest_edge = 256x256
+    max_pixels: 16777216            # longest_edge ≈ 4096x4096
+    align_multiple: 32              # patch_size(16) x merge_size(2)
+    processor: "Qwen3VLProcessor / Qwen2VLImageProcessorFast"
+    normalize: "mean=std=0.5 → [-1,1]"
+    recommended_16x9: [1920, 1080]
+    recommended_9x16: [1088, 1920]
+
+# -----------------------------------------------------------------------------
+# 9. 官方短剧流水线（3d-animation-short-generator）
+# -----------------------------------------------------------------------------
+official_pipeline:
+  steps: ["项目简报", "故事大纲", "角色卡", "场景卡", "六列标准镜头信息表",
+          "5.5 自检", "单文本分镜/可选铅笔分镜", "视频模型+分辨率选项卡+单镜头渲染",
+          "全片拼接+BGM", "最终复查"]
+  authorities:                      # 渲染时不可违背的三个权威源
+    shot: "单文本分镜文档（叙事/构图/运镜/编排/每秒时间/镜头号）"
+    identity: "角色卡"
+    environment: "场景卡"
+  strip_before_render: ["[char:…]", "[scene:…]", "[shot:…]", "[dur:…]", "[hook:…]"]
+  shot_table_columns: ["镜头编号&时长", "连续性衔接", "参考锚点（空间+身份）",
+                       "Hook 类型", "镜头描述（每秒指令）", "音频与对白轨"]
+
+  h3_failure_ladder:                # 可直接抄进 orchestrator/worker.py
+    1: "用直接引用『参考锚点』块的强化 prompt 重渲染"
+    2: "把该镜缩到 ≤6s，砍掉的秒拆到新相邻行，重跑自检再渲"
+    3: "把这一镜切到 Seedance 2.0"
+    4: "暂停并问用户：切模型 / 放宽要求 / 跳过标 placeholder: missing clip / 手动提供"
+
+  h3_profile:
+    strengths: ["视觉包装", "动效图形", "文字/UI 清晰度", "多模态上下文理解", "性价比"]
+    max_seconds_per_clip: 15
+    native_audio: "双声道"
+    recommended_resolution: "768P（性价比） / 2K（质量）"
+    weakness: "高强度动画表演与复杂运镜 → 回退 Seedance 2.0"

@@ -287,10 +287,32 @@ non_diegetic_music: <Audio 2> is directly reused as the complete audience-only s
 
 ## 4. 设定图实践规范（本项目补充，官方未规定）
 
+### 🔴 设定图分两类，比例不同（官方明文）
+
+官方 `3d-animation-short-generator` 技能原文：**"每张角色卡在可能时为 16:9 生产参考图"**。
+
+| 类型 | 比例 | 用途 | 理由 |
+|---|---|---|---|
+| **角色卡 / 场景卡** | **16:9** | REF2VA 的 `<Picture N>` 主力，锁定身份与环境 | 要塞下三视图 + 表情 + 道具细节 + 文字标注 |
+| **首帧 / 尾帧 / 关键帧** | **= 目标视频比例**（竖屏 9:16） | FL2VA / I2VA / L2VA 的实际画面 | 要当画面用，比例必须对齐否则构图错位 |
+
+**角色卡必含元素（官方清单）**：角色名标注 · 角色定位标注 · **主 3/4 视角** ·
+**正/侧/背三视图** · 表情 · 材质/服装/道具细节 · 重要道具标注 · 提示中重复的"**身份锁**" ·
+视觉 ID 备注（年龄段/身材/发型/服饰色/签名道具/**不可改特征**）
+
+**场景卡硬性规则**：**只能展示环境，不出现人物、人群、剪影、手、脸或角色客串**。
+必含：主环境总览 · 关键光态（日/夜）· 情绪子空间 ·
+**连续性地标**（跨镜头保持屏幕位置的固定物体）· 环境中的重要道具
+
+> ⚠️ 官方警告：角色卡锁定后再改，需重做镜头表、分镜、片段、正片与最终合成。
+> → 本项目里等于**改一次设定图要全链路重跑**。
+
 | 项 | 规范 | 理由 |
 |---|---|---|
-| 长宽比 | 与目标视频一致（竖屏 9:16 就出竖屏） | 避免裁切导致构图错位 |
-| 尺寸 | 9:16 → `1088×1920`（生成）→ 喂入时缩到目标分辨率 | 16/32 的倍数，对齐 VAE patchify |
+| 角色卡尺寸 | `1920×1080`（16:9） | 32 的倍数 |
+| 首尾帧尺寸 | `1088×1920`（9:16） | 32 的倍数 |
+| **宽高对齐** | **必须是 32 的倍数** | `patch_size(16) × merge_size(2) = 32`，来自 `preprocessor_config.json` |
+| 像素范围 | 65,536（256×256）～ 16,777,216（≈4096×4096） | `shortest_edge` / `longest_edge` |
 | 单次批量 | **≤ 4 张** | Qwen-Image-2.1 ≤4 张可开 KV cache（3.4× 加速）；10GB 显存约束 |
 | 总张数 | 每个主体 ≤ 9（对齐 REF2VA 上限） | |
 | 内容分工 | 正面 / 侧面 / 背面 / 服装细节；场景板单独出 | REF2VA 靠多视角锁定身份 |
@@ -300,12 +322,14 @@ non_diegetic_music: <Audio 2> is directly reused as the complete audience-only s
 ### 设定图 → 标签映射
 
 ```
-Picture 1  角色A 正面定妆照  → <Subject 1> is the ... in <Picture 1>
-Picture 2  角色A 侧面定妆照  → 同上，强化 identity
-Picture 3  角色A 服装细节    → attribute_transfer
-Picture 4  场景板            → 单独 <Subject N>，或作 storyboard reference
-（FL2VA）  Picture 5 首帧    → "Picture 5 (from Shot 1) aligns with the 0.00-second mark"
+Picture 1  角色A 角色卡（16:9，含三视图+标注） → <Subject 1> is the ... in <Picture 1>
+Picture 2  角色B 角色卡                        → <Subject 2> is the ... in <Picture 2>
+Picture 3  场景卡（纯环境，无人物）             → 单独 <Subject N>，或 storyboard reference
+（FL2VA）  Picture 4 首帧（9:16）               → "Picture 4 (from Shot 1) aligns with the 0.00-second mark"
 ```
+
+> 提示：角色卡一张图里已含正/侧/背三视图，所以**不必**为同一角色出三张独立设定图 ——
+> 这能省下 REF2VA 的 9 张配额。
 
 ---
 

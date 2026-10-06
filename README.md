@@ -10,12 +10,22 @@
 
 ---
 
-> 📦 **MiniMax 官方提示词技能已内置**：`spec/official/h3-prompt-writing/`
-> 来自 `MiniMax-AI/MiniMax-H3` 的 `.agents/skills/` 与 `.claude/skills/`（两份完全相同）。
-> 官方 frontmatter 明写 "Portable to any agent that can read local files … does not restrict the
-> skill to OpenAI agents" —— **可直接装进 Claude Code / Hermes / 任意框架**。
-> 权威规范是 `references/base-en.txt`（222 行）与 `references/ref-en.txt`（341 行），
+> 📦 **MiniMax 官方 9 个技能已全部内置**：`spec/official/`（17 个 md，316KB）
+> - `h3-prompt-writing` —— 提示词规范（来自 `.agents/skills/` 与 `.claude/skills/`）
+> - **8 个短视频专项技能**（来自顶层 `skills/`）：`3d-animation-short-generator`、
+>   `brand-promo-video-generator`、`minimalist-product-ad-generator`、
+>   `music-video-subtitle-generator`、`co-op-game-intro-generator`、
+>   `papercraft-stop-motion-explainer`、`paper-collage-explainer-generator`、
+>   `handdrawn-live-video-generator` —— **均带中文版 `SKILL.cn.md`**
+>
+> 官方安装：`npx skills add https://github.com/MiniMax-AI/MiniMax-H3 --skill '*'`
+> 也可直接复制 `SKILL.md` 到任意 Agent 的 skills 目录（官方明说兼容 Claude Code / Cursor /
+> Windsurf / Codex / LangChain / 任何能读 SKILL.md 的框架）。
+>
+> **权威提示词规范**：`references/base-en.txt`（222 行）+ `references/ref-en.txt`（341 行），
 > **与本文档冲突时以它们为准**。
+> **设定图要求**见 [docs/10-OFFICIAL-SKILLS.md §2](docs/10-OFFICIAL-SKILLS.md) ——
+> 官方明文规定角色卡/场景卡用 **16:9**，首尾帧才跟目标视频比例。
 
 ## 0. 三句话结论（先读这个）
 
@@ -59,7 +69,8 @@ F:\Agent H3\
 │   ├── 06-WORKFLOW-MATRIX.md      工作流矩阵（SLA/Veda × fused/lora/none）
 │   ├── 07-SOURCES.md              全部调研资料与出处
 │   ├── 08-RUNBOOK.md              执行手册
-│   └── 09-NODE-INVENTORY.md       ★ 实测节点清单（从你本地可跑的工作流提取）
+│   ├── 09-NODE-INVENTORY.md       ★ 实测节点清单（从你本地可跑的工作流提取）
+│   └── 10-OFFICIAL-SKILLS.md      ★ 官方 9 个技能全解 + 设定图要求 + 短剧流水线
 ├── agent/
 │   ├── SKILL.md                   给 Agent 加载的执行手册
 │   ├── TOOL-CONTRACT.md           工具契约（换 Agent 只改这一层）
