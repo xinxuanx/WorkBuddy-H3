@@ -186,6 +186,47 @@ h3_weights:
       质量基线/对照组。缺点致命：FL2VA 与 Ref2VA 是两个独立 ~20GB 文件，
       10GB 卡上切换任务要重新加载，不现实。只作 A/B 对照用。
 
+  # ---- 候选 F/G：用户指定要做 8 步 960x544 + X2 放大的两档 ----
+  dasiwa_hybrid_turbo_v3_int8_8step:
+    file: "dasiwa_minimax_h3_ref2va_v3_pruned_hybrid_turbo_int8_row-wise_convrot_runtime_mixed.safetensors"
+    size_bytes: 20_480_000_000
+    source: "https://civitai.com/models/2877206/dasiwa-minimax-h3?modelVersionId=3374439"
+    kind: hybrid
+    modes: [t2va, i2va, l2va, fl2va, ref2va]
+    turbo: fused
+    recommended_steps: 8                    # ★ 用户指定：8 步
+    sampler: [res_multistep, euler]
+    scheduler: simple
+    shift_video: [6, 12]
+    shift_audio: [3, 5]
+    min_tier: t16
+    x2_profile:
+      res: "960x544"
+      note: "横屏 16:9；960/32=30, 544/32=17 均为 32 的倍数 ✅"
+
+  singularity_int8_ref2v_turbo8:
+    file: "Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors"
+    size_bytes: 21_000_000_000
+    source: "https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity"
+    kind: finetuned
+    modes: [t2va, i2va, ref2va, v2va]
+    turbo: lora                             # ★ 外挂 turbo LoRA
+    turbo_lora: "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors"
+    turbo_strength: 1.0
+    recommended_steps: 8                    # ★ 用户指定：8 步
+    sampler: res_multistep
+    scheduler: simple
+    shift_video: 12
+    shift_audio: 3
+    min_tier: t16
+    x2_profile:
+      res: "960x544"
+    strengths: ["HDR / 去运动模糊", "远景人脸修复", "去油光去塑料感", "武打/奇幻 VFX"]
+    note: >
+      ⚠️ registry 里官方 Comfy-Org 提供的是 ref2v_turbo_4step_v0.1；
+      用户指定用 8step 版本。若本地只有 4step 版，请在此改 turbo_lora 文件名，
+      并把 recommended_steps 调到 4（但 4 步 ref2va 有漂移风险，见 docs/03 §5）。
+
   # ---- 候选 E：你本地的 hybrid（来源待确认） ----
   local_hybrid_b25_49_int8:
     file: "minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors"
@@ -198,6 +239,51 @@ h3_weights:
     verdict: "疑似 smhfacct 的 hybrid 系列（b25-49 为 block 区间）。已下载，待实测。"
 
 # -----------------------------------------------------------------------------
+# 2bis. 必需节点包（★ 三个是 2026-10-06 从已实测参考工作流中新发现的，之前漏了）
+# -----------------------------------------------------------------------------
+node_packs:
+  required:
+    ComfyUI-KJNodes:
+      url: "https://github.com/kijai/ComfyUI-KJNodes"
+      provides: ["MiniMaxChunkFeedForward"]
+      note: "★ 低显存必备。chunks=4 可把 FFN 分块，MATLOWAI 实测 16GB 跑 H3 靠它"
+    ComfyUI-DaSiWa-Nodes:
+      url: "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes"
+      provides: ["MiniMaxH3Director", "DaSiWa_SeedControl", "DaSiWa_NodeStatusSwitch",
+                  "DaSiWa_LTX2LoraLoader", "DaSiWa_MetadataImageSaver",
+                  "DaSiWa_EnhancedVideoCombine", "DaSiWaH3ContinuityPublish"]
+    ComfyUI-GGUF:
+      url: "https://github.com/city96/ComfyUI-GGUF"
+      provides: ["Unet Loader (GGUF)"]
+      note: "低显存走 GGUF 时用；注意 Qwen-Image-2.1 需 leejet fork"
+
+  for_x2_upscale:
+    ComfyUI-H3-X2-Stream:
+      url: "https://github.com/sepiablue-ai/ComfyUI-H3-X2-Stream"
+      provides: ["H3X2PrepareINT8VAE", "H3X2StreamSave", "H3X2ChunkFeedForward"]
+      note: "★ 960x544 -> X2 VAE 2x 解码 -> 1920x1088，异步 NVENC 落盘。实测 ComfyUI 0.37.0 / RTX 4070 12GB"
+      examples: "examples/fl2va_4step_case01.json（已下载到 spec/reference/x2-stream-examples/）"
+
+  for_qwen21_setting_images:
+    Comfyui-Spectrum-Qwen2.1:
+      url: "https://github.com/awdqwdasdg/Comfyui-Spectrum-Qwen2.1"
+      provides: ["SpectrumQwenImage21"]
+      note: "★ Qwen-Image-2.1 步数预测加速，★89。4 张关键帧可共用同一个 Spectrum 节点"
+      params: {warmup_steps: 5, tail_actual_steps: 2, window_size: 2.0, flex_window: 0.75,
+               max_consecutive_forecasts: 8, history_points: 8, chebyshev_degree: 4,
+               ridge_lambda: 0.1, blend_weight: 0.5, cache_device: "main_device",
+               force_actual_on_control: true, debug: true}
+    ComfyUI-MiniMax-H3-MotionCache-FastVAE:
+      url: "https://github.com/Mozer/ComfyUI-MiniMax-H3-MotionCache-FastVAE"
+      provides: ["MiniMaxH3FastVAEDecode"]
+      note: "H3 快速批量 VAE 解码（MotionCache 另有用但本工作流未用）"
+
+  optional:
+    ComfyUI-H3-Motion-Context: {url: "https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context", note: "跨 clip 续接，需 ComfyUI>=0.34"}
+    veda-sparse-attention: {url: "https://github.com/veda-sparse/Veda-on-ComfyUI", note: "需 ComfyUI>=0.38，与 SLA 互斥"}
+    Comfyui-MiniMax-H3-W4A4-VSA: {url: "https://github.com/sepiablue-ai/ComfyUI-MiniMax-H3-W4A4-VSA", note: "W4A4 量化 + VSA"}
+
+# -----------------------------------------------------------------------------
 # 3. 配套模型
 # -----------------------------------------------------------------------------
 support_models:
@@ -205,6 +291,10 @@ support_models:
     qwen3vl_32b_int8_convrot: {file: "qwen3vl_32b_minimax_h3_int8_convrot.safetensors", size_gb: 27.1}
     qwen3vl_32b_nvfp4_awq:    {file: "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",    size_gb: 15.7, note: "不需要 Blackwell"}
   vae:                              # models/vae/
+    x2_detail_v1:             {file: "MiniMax-H3-X2-Detail-v1.safetensors", size_gb: null,
+                               source: "https://huggingface.co/speach1sdef178/MiniMax-H3-X2-Detail-VAE",
+                               note: "★ 2x 细节放大 VAE。原始 bf16 需先用 H3X2PrepareINT8VAE 转成 INT8 才能用",
+                               sha256: "2296840f4acedcaa976688e7d7b97f7bf570b136e400385d3f46224011897aac"}
     official_fp16:            {file: "minimax_h3_video_vae_fp16.safetensors",           size_gb: 5.21}
     official_int8_convrot:    {file: "minimax_h3_video_vae_int8_convrot.safetensors",   size_gb: 2.81, note: "需 ComfyUI>=0.36 才有约 2x 提速"}
     lynnreal_light_int8_convrot: {file: "minimax_h3_lynnreal_light_vae_int8_convrot.safetensors", size_gb: 2.14,

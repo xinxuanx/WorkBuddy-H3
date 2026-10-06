@@ -49,6 +49,10 @@ def _slot(graph: dict, key: str, value) -> dict:
     if node_id is None:
         raise SystemExit(f"未知槽位 {key}；可用：{list(KEYMAP)}")
     if node_id not in graph:
+        # X2 templates (h3_x2.json) omit VHS_VideoCombine(60); H3X2StreamSave handles saving.
+        # Skip silently for optional slots rather than crashing.
+        if key in ("JOB_ID",):
+            return graph
         raise SystemExit(f"图中没有节点 {node_id}（可能被条件剔除）")
     graph[node_id]["inputs"][inp] = value
     return graph

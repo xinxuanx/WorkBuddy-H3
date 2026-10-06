@@ -1,0 +1,202 @@
+{
+  "_comment": [
+    "H3 + X2-Detail 2x upscale template. Node IDs MUST stay compatible with h3_core.json",
+    "so build_workflow.py _slot() and worker.py KEYMAP keep working.",
+    "",
+    "Reference implementations:",
+    "  A) sepiablue-ai/ComfyUI-H3-X2-Stream examples/fl2va_4step_case01.json",
+    "  B) MATLOWAI: res_multistep + simple + shift 12/3 + SLA + StreamedBlocks",
+    "",
+    "X2 chain additions (vs h3_core.json):",
+    "  23 VAELoader(X2-Detail VAE) -> 24 H3X2PrepareINT8VAE -> 55 H3X2StreamSave",
+    "  50 VAEDecode + 60 VHS_VideoCombine are REMOVED; X2 decodes inside StreamSave.",
+    "",
+    "Dual-VAE design (official X2-Stream requirement):",
+    "  - Node 21 (video VAE int8_convrot) -> Yuan_MiniMaxH3Video(30) for conditioning",
+    "  - Node 23 (X2-Detail VAE) -> 24 H3X2PrepareINT8VAE -> 55 H3X2StreamSave for final decode",
+    "",
+    "Resolution: 960x544 input -> 1920x1088 X2 output (crop/resize to 1920x1080 if needed).",
+    "_cond nodes: attention==sla emits Model Sparse Attention; attention==veda emits Veda; turbo==lora emits LoRA."
+  ],
+
+  "10": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "{{UNET_NAME}}",
+      "weight_dtype": "{{WEIGHT_DTYPE}}"
+    }
+  },
+
+  "11": {
+    "_cond": { "include_if": "turbo == 'lora'" },
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": ["10", 0],
+      "lora_name": "{{TURBO_LORA}}",
+      "strength_model": "{{TURBO_STRENGTH}}"
+    }
+  },
+
+  "12": {
+    "class_type": "MiniMaxH3SigmaShift",
+    "inputs": {
+      "model": ["11", 0],
+      "shift_video": "{{SHIFT_VIDEO}}",
+      "shift_audio": "{{SHIFT_AUDIO}}"
+    }
+  },
+
+  "13": {
+    "_cond": { "include_if": "attention == 'sla'" },
+    "class_type": "Model Sparse Attention",
+    "inputs": {
+      "model": ["12", 0],
+      "method": "sol-attn",
+      "tau": 1.3,
+      "start_percent": 0.2,
+      "end_percent": 1.0,
+      "min_tokens": 12288,
+      "extra_tokens": 256,
+      "sink_conditioning": "{{SINK_CONDITIONING}}",
+      "verbose": false
+    }
+  },
+
+  "14": {
+    "_cond": { "include_if": "attention == 'veda'" },
+    "class_type": "Veda Sparse Attention (MiniMax H3)",
+    "inputs": {
+      "model": ["13", 0],
+      "predictor": "minimax_h3_t2va_veda_8nfe_600step_preview_fp8.safetensors",
+      "generated_sparsity": "{{SPARSITY}}",
+      "reference_sparsity": "{{SPARSITY}}",
+      "verbose": false
+    }
+  },
+
+  "15": {
+    "class_type": "H3StreamedBlocks",
+    "inputs": {
+      "model": ["14", 0],
+      "q_chunk": 16384,
+      "kv_chunk": 16384,
+      "mlp_chunk": 16384,
+      "min_tokens": 32768,
+      "kv_block": 0,
+      "final_layer_chunk": 16384,
+      "final_layer_gemm": "exact (whole GEMM, one fp32 buffer)",
+      "kv_store": "bf16 (exact)",
+      "trim_forward": true,
+      "self_check": false,
+      "exact_av_rows": false
+    }
+  },
+
+  "20": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "{{CLIP_NAME}}",
+      "type": "{{CLIP_TYPE}}",
+      "device": "default"
+    }
+  },
+
+  "21": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "{{VIDEO_VAE}}" }
+  },
+
+  "22": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "{{AUDIO_VAE}}" }
+  },
+
+  "23": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "{{X2_DETAIL_VAE}}" }
+  },
+
+  "24": {
+    "class_type": "H3X2PrepareINT8VAE",
+    "inputs": {
+      "vae": ["23", 0],
+      "fp16_accumulation": true
+    }
+  },
+
+  "30": {
+    "class_type": "Yuan_MiniMaxH3Video",
+    "inputs": {
+      "clip": ["20", 0],
+      "vae": ["21", 0],
+      "audio_vae": ["22", 0],
+      "ref_images": ["31", 0],
+      "mode": "{{MODE}}",
+      "prompt": "{{PROMPT}}",
+      "width": "{{WIDTH}}",
+      "height": "{{HEIGHT}}",
+      "length": "{{LENGTH}}",
+      "ref_image_size": "匹配",
+      "guide_frame_idx": 0
+    }
+  },
+
+  "31": {
+    "class_type": "MultiImageLoader",
+    "inputs": {
+      "image_paths": "{{REF_IMAGES}}",
+      "start_index": 0,
+      "max_count": 9
+    }
+  },
+
+  "40": {
+    "class_type": "KSamplerSelect",
+    "inputs": { "sampler_name": "{{SAMPLER}}" }
+  },
+
+  "41": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": ["15", 0],
+      "scheduler": "{{SCHEDULER}}",
+      "steps": "{{STEPS}}",
+      "denoise": 1.0
+    }
+  },
+
+  "42": {
+    "class_type": "RandomNoise",
+    "inputs": { "noise_seed": "{{SEED}}" }
+  },
+
+  "43": {
+    "class_type": "BasicGuider",
+    "inputs": {
+      "model": ["15", 0],
+      "conditioning": ["30", 0]
+    }
+  },
+
+  "44": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "guider": ["43", 0],
+      "sampler": ["40", 0],
+      "sigmas": ["41", 0],
+      "latent_image": ["30", 1],
+      "noise": ["42", 0]
+    }
+  },
+
+  "55": {
+    "class_type": "H3X2StreamSave",
+    "inputs": {
+      "vae": ["24", 0],
+      "latent": ["44", 0],
+      "nvenc_gpu_index": 0,
+      "fps": 24,
+      "quality": 18
+    }
+  }
+}

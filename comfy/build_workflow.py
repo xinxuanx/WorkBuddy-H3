@@ -53,11 +53,18 @@ class ValidationError(Exception):
 # =========================================================================== #
 # 硬校验 —— 构建期拦截，不产出坏结果
 # =========================================================================== #
-def validate(reg: dict, *, tier: str, weight: str, attention: str, turbo: str,
+def validate(reg: dict, *, family: str, tier: str, weight: str, attention: str, turbo: str,
              mode: str, steps: int, ref_images: list[str], ref_seconds: float | None,
              require_identity_fidelity: bool, comfy_version: str | None) -> list[str]:
     """返回警告列表；致命问题直接抛 ValidationError。"""
     warns: list[str] = []
+
+    if family == "qwen21":
+        # Qwen-Image-2.1 校验：只检查档位是否存在
+        tiers = reg["hardware_tiers"]
+        if tier not in tiers:
+            raise ValidationError(f"未知档位 {tier}，可选：{list(tiers)}")
+        return warns
 
     tiers = reg["hardware_tiers"]
     weights = reg["h3_weights"]
@@ -137,8 +144,53 @@ def build(reg: dict, *, tier: str, weight: str, attention: str, turbo: str,
           mode: str, seed: int = 0, steps: int | None = None,
           res: str | None = None, prompt: str = "", ref_images: list[str] | None = None,
           require_identity_fidelity: bool = False, allow_4step_ref: bool = False,
-          comfy_version: str | None = None) -> dict:
+          comfy_version: str | None = None, family: str = "core",
+          first_frame: str = "", last_frame: str = "",
+          negative_prompt: str = "", resolution: int | None = None,
+          spectrum: bool = True, cache: bool = True) -> dict:
     ref_images = ref_images or []
+
+    # ------------------------------------------------------------------ #
+    # Qwen-Image-2.1 setting image branch
+    # ------------------------------------------------------------------ #
+    if family == "qwen21":
+        warns = validate(reg, family=family, tier=tier, weight=weight, attention=attention,
+                         turbo=turbo, mode=mode, steps=steps or 25, ref_images=ref_images,
+                         ref_seconds=None, require_identity_fidelity=False,
+                         comfy_version=comfy_version)
+        for m in warns:
+            print(f"  ⚠ {m}", file=sys.stderr)
+
+        qwen = reg.get("setting_image_models", {}).get("qwen_image_2_1", {})
+        tmpl = json.loads((TEMPLATES / "qwen21_setting_image.json").read_text(encoding="utf-8"))
+
+        slots = {
+            "{{UNET_NAME}}":      qwen.get("files", {}).get("diffusion_models", "qwen_image_2.1_int8_convrot.safetensors"),
+            "{{CLIP_NAME}}":      qwen.get("files", {}).get("text_encoders", "qwen3vl_8b_int8_convrot.safetensors"),
+            "{{VAE_NAME}}":       qwen.get("files", {}).get("vae", "qwen_image_2.1_vae_bf16.safetensors"),
+            "{{PROMPT}}":         prompt,
+            "{{NEGATIVE_PROMPT}}": negative_prompt,
+            "{{RESOLUTION}}":     resolution or qwen.get("native_resolution_hint", 1280),
+            "{{STEPS}}":          steps or qwen.get("steps", 25),
+            "{{CFG}}":            qwen.get("cfg", 1),
+            "{{SAMPLER}}":        qwen.get("sampler", "euler"),
+            "{{SCHEDULER}}":      qwen.get("scheduler", "simple"),
+            "{{SEED}}":           seed,
+            "{{JOB_ID}}":         "qwen21job",
+        }
+        graph = _render(tmpl, slots)
+        graph = _apply_conditions(graph, spectrum=spectrum, cache=cache)
+        graph["_meta"] = {
+            "family": family, "variant": "qwen21_setting", "tier": tier,
+            "steps": steps or 25, "resolution": resolution or 1280,
+            "seed": seed, "spectrum": spectrum, "cache": cache,
+            "generator": "build_workflow.py",
+        }
+        return graph
+
+    # ------------------------------------------------------------------ #
+    # H3 core / x2 branch
+    # ------------------------------------------------------------------ #
     t = reg["hardware_tiers"][tier]
     w = reg["h3_weights"][weight]
 
@@ -148,7 +200,7 @@ def build(reg: dict, *, tier: str, weight: str, attention: str, turbo: str,
     if res is None:
         res = t["resolution_presets"]["portrait"]     # 默认竖屏（短视频）
 
-    warns = validate(reg, tier=tier, weight=weight, attention=attention, turbo=turbo,
+    warns = validate(reg, family=family, tier=tier, weight=weight, attention=attention, turbo=turbo,
                      mode=mode, steps=steps, ref_images=ref_images, ref_seconds=None,
                      require_identity_fidelity=require_identity_fidelity
                      and not allow_4step_ref, comfy_version=comfy_version)
@@ -158,7 +210,8 @@ def build(reg: dict, *, tier: str, weight: str, attention: str, turbo: str,
     width, height = (int(x) for x in res.lower().split("x"))
     length = _frames_for(tier)
 
-    tmpl = json.loads((TEMPLATES / "h3_core.json").read_text(encoding="utf-8"))
+    tmpl_name = "h3_x2.json" if family == "x2" else "h3_core.json"
+    tmpl = json.loads((TEMPLATES / tmpl_name).read_text(encoding="utf-8"))
 
     # --- 槽位取值表（唯一真源） ---
     slots = {
@@ -185,17 +238,32 @@ def build(reg: dict, *, tier: str, weight: str, attention: str, turbo: str,
         "{{TURBO_STRENGTH}}": 1.0,
         "{{JOB_ID}}":      "h3job",
         "{{SINK_CONDITIONING}}": "exact_kv_and_rows",
-        "{{SPARSITY}}":    90.0,
+        "{{SPARSITY}}":    90.0 if family == "core" else 5.0,
+        # ---- x2 家族专用槽位 ----
+        "{{X2_DETAIL_VAE}}": reg["support_models"]["vae"]["x2_detail_v1"]["file"],
+        "{{FIRST_FRAME}}":   first_frame or "SELECT_FIRST_FRAME.png",
+        "{{LAST_FRAME}}":    last_frame or "SELECT_LAST_FRAME.png",
+        "{{CHUNK_FFN}}":     4 if tier in ("t10", "t16") else 1,
     }
 
     graph = _render(tmpl, slots)
-    graph = _apply_conditions(graph, attention=attention, turbo=turbo)
+    graph = _apply_conditions(graph, attention=attention, turbo=turbo, mode=mode)
+
+    # h3_x2.json uses the same unified Yuan_MiniMaxH3Video(30) node as h3_core.json,
+    # so no FL2VA/REF2VA node switching is needed. X2-Stream handles dual-VAE decode
+    # via H3X2PrepareINT8VAE(24) -> H3X2StreamSave(55).
     graph["_meta"] = {
-        "variant": f"h3_{attention}_{turbo}", "mode": mode, "tier": tier,
+        "family": family, "variant": f"h3_{attention}_{turbo}", "mode": mode, "tier": tier,
         "weight": weight, "steps": steps, "res": f"{width}x{height}",
         "length_frames": length, "seed": seed,
         "generator": "build_workflow.py",
     }
+    if family == "x2":
+        graph["_meta"]["upscale"] = {
+            "in": f"{width}x{height}",
+            "x2_out": f"{width*2}x{height*2}",
+            "target_1080p": "需后处理 crop/resize 到 1920x1080（X2 是 2x，544*2=1088）",
+        }
     return graph
 
 
@@ -256,14 +324,16 @@ def _render(obj, slots: dict):
     return obj
 
 
-def _apply_conditions(graph: dict, *, attention: str, turbo: str) -> dict:
+def _apply_conditions(graph: dict, *, attention: str = "", turbo: str = "", mode: str = "",
+                        spectrum: bool = False, cache: bool = False) -> dict:
     """按条件发射/剔除节点。
 
     模板里每个可条件节点带 `_cond`：
         "_cond": {"include_if": "attention == 'sla'"}
     被剔除的节点会从图中删除，并把它的输入链路短路到下游。
     """
-    active = {"attention": attention, "turbo": turbo}
+    active = {"attention": attention, "turbo": turbo, "mode": mode,
+              "spectrum": spectrum, "cache": cache}
     nodes = {k: v for k, v in graph.items() if not k.startswith("_")}
     graph = {k: v for k, v in graph.items() if k.startswith("_")}
 
@@ -284,15 +354,28 @@ def _apply_conditions(graph: dict, *, attention: str, turbo: str) -> dict:
         keep[nid] = node
 
     # 短路：把被删节点的输入，接到消费它输出的下游节点上
-    for dnid, dnode in dropped.items():
-        src_link = _first_input_link(dnode)
-        for nid, node in keep.items():
-            for inp in node.get("inputs", {}).values():
-                if isinstance(inp, list) and len(inp) == 2 and str(inp[0]) == dnid:
-                    if src_link is not None:
-                        inp[0], inp[1] = src_link[0], src_link[1]
-                    else:
-                        inp[:] = []
+    # 支持级联条件（A->B->C 多层删除），迭代直到所有 dropped 节点解析完毕
+    for _ in range(len(dropped) + 1):
+        progressed = False
+        for dnid in list(dropped.keys()):
+            dnode = dropped[dnid]
+            src_link = _first_input_link(dnode)
+            # 若输入链路指向另一个仍在 dropped 中的节点，先跳过等下一轮
+            if src_link and src_link[0] in dropped:
+                continue
+            # 修改 keep 与其它 dropped 节点中引用 dnid 的输入
+            all_nodes = list(keep.items()) + [(k, v) for k, v in dropped.items() if k != dnid]
+            for nid, node in all_nodes:
+                for k, inp in list(node.get("inputs", {}).items()):
+                    if isinstance(inp, list) and len(inp) == 2 and str(inp[0]) == dnid:
+                        if src_link is not None:
+                            node["inputs"][k] = [src_link[0], src_link[1]]
+                        else:
+                            node["inputs"][k] = []
+                        progressed = True
+            del dropped[dnid]
+        if not progressed:
+            break
     graph.update(keep)
     return graph
 
@@ -416,6 +499,16 @@ def main() -> None:
                    help="强身份一致（会禁用 ref2va 的 4 步）")
     b.add_argument("--allow-4step-ref", action="store_true")
     b.add_argument("--comfy-version")
+    b.add_argument("--family", default="core", choices=["core", "x2", "qwen21"],
+                   help="core=原生链路；x2=X2-Detail 2x 放大 + 异步 NVENC 落盘；qwen21=Qwen-Image-2.1 设定图")
+    b.add_argument("--first-frame", default="")
+    b.add_argument("--last-frame", default="")
+    b.add_argument("--negative-prompt", default="", help="Qwen21 专用：负面提示词")
+    b.add_argument("--resolution", type=int, help="Qwen21 专用：TextEncodeQwenImage21 resolution 参数")
+    b.add_argument("--spectrum", action="store_true", default=True, help="Qwen21 专用：启用 Spectrum 加速")
+    b.add_argument("--no-spectrum", action="store_false", dest="spectrum", help="Qwen21 专用：禁用 Spectrum")
+    b.add_argument("--cache", action="store_true", default=True, help="Qwen21 专用：启用 KV Cache")
+    b.add_argument("--no-cache", action="store_false", dest="cache", help="Qwen21 专用：禁用 KV Cache")
 
     d = sub.add_parser("derive")
     d.add_argument("--from", dest="src", required=True)
@@ -441,11 +534,17 @@ def main() -> None:
                       turbo=a.turbo, mode=a.mode, steps=a.steps, res=a.res,
                       seed=a.seed, prompt=a.prompt,
                       require_identity_fidelity=a.require_identity,
-                      allow_4step_ref=a.allow_4step_ref, comfy_version=a.comfy_version)
+                      allow_4step_ref=a.allow_4step_ref, comfy_version=a.comfy_version,
+                      family=a.family, first_frame=a.first_frame, last_frame=a.last_frame,
+                      negative_prompt=a.negative_prompt, resolution=a.resolution,
+                      spectrum=a.spectrum, cache=a.cache)
         except ValidationError as e:
             print(f"\n✗ 校验失败（不会产出坏工作流）：\n  {e}\n", file=sys.stderr)
             sys.exit(1)
-        name = f"h3_{a.attention}_{a.turbo}_{a.mode}.json"
+        if a.family == "qwen21":
+            name = f"qwen21_setting_{a.resolution or 'default'}_{a.steps or '25'}step.json"
+        else:
+            name = f"h3_{a.attention}_{a.turbo}_{a.mode}.json"
         p = out / name
         p.write_text(json.dumps(g, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"✓ {p}")

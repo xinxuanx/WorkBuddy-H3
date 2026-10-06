@@ -1,0 +1,117 @@
+{
+  "_comment": [
+    "Qwen-Image-2.1 setting image generator — compatible with H3 REF2VA requirements.",
+    "",
+    "Setting image types:",
+    "  A) Character card:  16:9  (1920x1080 recommended, prompt should request widescreen layout)",
+    "  B) Scene card:      16:9  (same as character card, no people/crowds/silhouettes)",
+    "  C) Keyframe:        follow target video ratio (e.g., 9:16 = 1088x1920 for portrait shorts)",
+    "",
+    "Key design points:",
+    "  - TextEncodeQwenImage21 outputs its own latent (slot 2) → no EmptyLatentImage needed.",
+    "  - Reference images (up to 16 slots) connect to image_1..image_16 for identity consistency.",
+    "  - ResolutionSelector(70) is provided as an unconnected helper for Agent-layer dimension calculations.",
+    "  - Spectrum acceleration(4) and KV cache(5) are conditional based on registry config.",
+    "",
+    "ComfyUI nodes used (all native or from registry-listed packs):",
+    "  UNETLoader, CLIPLoader(type=qwen_image), VAELoader, TextEncodeQwenImage21,",
+    "  KSampler, VAEDecode, SaveImage, ResolutionSelector, QwenImage21Cache, SpectrumQwenImage21"
+  ],
+
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "{{UNET_NAME}}",
+      "weight_dtype": "default"
+    }
+  },
+
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "{{CLIP_NAME}}",
+      "type": "qwen_image",
+      "device": "default"
+    }
+  },
+
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "{{VAE_NAME}}"
+    }
+  },
+
+  "4": {
+    "_cond": { "include_if": "spectrum == True" },
+    "class_type": "SpectrumQwenImage21",
+    "inputs": {
+      "model": ["1", 0],
+      "warmup_steps": 5,
+      "tail_actual_steps": 2,
+      "window_size": 2.0,
+      "flex_window": 0.75,
+      "max_consecutive_forecasts": 8,
+      "history_points": 8,
+      "chebyshev_degree": 4,
+      "ridge_lambda": 0.1,
+      "blend_weight": 0.5,
+      "cache_device": "main_device",
+      "force_actual_on_control": true,
+      "debug": false
+    }
+  },
+
+  "5": {
+    "_cond": { "include_if": "cache == True" },
+    "class_type": "QwenImage21Cache",
+    "inputs": {
+      "model": ["4", 0],
+      "device": "auto",
+      "dtype": "default"
+    }
+  },
+
+  "10": {
+    "class_type": "TextEncodeQwenImage21",
+    "inputs": {
+      "clip": ["2", 0],
+      "prompt": "{{PROMPT}}",
+      "negative_prompt": "{{NEGATIVE_PROMPT}}",
+      "vae": ["3", 0],
+      "resolution": "{{RESOLUTION}}"
+    }
+  },
+
+  "20": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["5", 0],
+      "positive": ["10", 0],
+      "negative": ["10", 1],
+      "latent_image": ["10", 2],
+      "seed": "{{SEED}}",
+      "steps": "{{STEPS}}",
+      "cfg": "{{CFG}}",
+      "sampler_name": "{{SAMPLER}}",
+      "scheduler": "{{SCHEDULER}}",
+      "denoise": 1.0
+    }
+  },
+
+  "30": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["20", 0],
+      "vae": ["3", 0]
+    }
+  },
+
+  "40": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["30", 0],
+      "filename_prefix": "{{JOB_ID}}"
+    }
+  }
+}
